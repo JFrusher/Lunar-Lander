@@ -6,7 +6,7 @@ import gymnasium as gym
 import matplotlib.pyplot as plt
 import pandas as pd
 
-from controllers.base import BaseController
+from ..controllers.base import BaseController
 
 # A landing is considered successful once the episode's total reward crosses
 # this threshold (LunarLander awards +100 for a safe landing on top of the

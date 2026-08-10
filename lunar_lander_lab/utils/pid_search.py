@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from utils.evaluation import CRASH_REWARD_THRESHOLD, SUCCESS_REWARD_THRESHOLD
+from .evaluation import CRASH_REWARD_THRESHOLD, SUCCESS_REWARD_THRESHOLD
 
 # Bounds for the gains that matter, per sweep-v1 analysis:
 # - ANGLE_GAIN_POS dropped: corr with reward was -0.04 in v1, fixed at its default.
@@ -63,7 +63,7 @@ def _evaluate_gain_set(args: Tuple[Dict[str, float], int, str]) -> Dict[str, flo
 
     import gymnasium as gym
 
-    from controllers.heuristic import HeuristicController
+    from ..controllers.heuristic import HeuristicController
 
     controller = HeuristicController()
     for name, value in gains.items():

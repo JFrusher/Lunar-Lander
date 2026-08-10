@@ -1,9 +1,9 @@
 """CLI entry point for the LunarLander control/RL lab.
 
 Usage:
-    python main.py run --controller [heuristic|rl]
-    python main.py train --timesteps 100000
-    python main.py benchmark --episodes 50
+    lunar-lander run --controller [heuristic|rl]
+    lunar-lander train --timesteps 100000
+    lunar-lander benchmark --episodes 50
 """
 
 import argparse
@@ -11,9 +11,9 @@ from typing import Optional
 
 import gymnasium as gym
 
-from controllers import HeuristicController, RLAgent
-from utils.evaluation import SUCCESS_REWARD_THRESHOLD, run_benchmark
-from utils.pid_search import run_monte_carlo
+from .controllers import HeuristicController, RLAgent
+from .utils.evaluation import SUCCESS_REWARD_THRESHOLD, run_benchmark
+from .utils.pid_search import run_monte_carlo
 
 DEFAULT_MODEL_NAME = "ppo_lunar_lander"
 
