@@ -1,0 +1,26 @@
+[project]
+name = "lunar-lander-lab"
+version = "0.1.0"
+description = "Classical control and RL experiments on Gymnasium's LunarLander-v3."
+requires-python = ">=3.10,<3.13"
+dependencies = [
+    "gymnasium[box2d]>=1.0.0",
+    "stable-baselines3>=2.3.0",
+    "torch>=2.2.0",
+    "matplotlib>=3.8.0",
+    "numpy>=1.26.0",
+    "pandas>=2.2.0",
+]
+
+[project.scripts]
+lunar-lander = "lunar_lander_lab.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["lunar_lander_lab*"]
+
+[tool.setuptools.package-data]
+lunar_lander_lab = ["configs/*.json"]

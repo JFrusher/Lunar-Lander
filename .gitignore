@@ -2,5 +2,7 @@
 .claude/
 **/tmp/
 **/__pycache__/
-lunar_lander_lab/models
-lunar_lander_lab/pid_search_results_*
+runs/
+*.egg-info/
+build/
+dist/
