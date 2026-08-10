@@ -7,41 +7,58 @@ Usage:
 """
 
 import argparse
+from typing import Optional
 
 import gymnasium as gym
 
 from controllers import HeuristicController, RLAgent
-from utils.evaluation import run_benchmark
+from utils.evaluation import SUCCESS_REWARD_THRESHOLD, run_benchmark
 from utils.pid_search import run_monte_carlo
 
 DEFAULT_MODEL_NAME = "ppo_lunar_lander"
 
 
-def build_controller(name: str):
+def build_controller(name: str, model_name: Optional[str] = None):
     if name == "heuristic":
         return HeuristicController()
     if name == "rl":
         agent = RLAgent()
-        agent.load(DEFAULT_MODEL_NAME)
+        agent.load(model_name or DEFAULT_MODEL_NAME)
         return agent
     raise ValueError(f"Unknown controller: {name}")
 
 
 def cmd_run(args: argparse.Namespace) -> None:
-    controller = build_controller(args.controller)
+    controller = build_controller(args.controller, model_name=args.model)
     env = gym.make("LunarLander-v3", render_mode="human")
 
-    observation, _ = env.reset(seed=args.seed)
-    total_reward = 0.0
-    terminated = truncated = False
+    episode = 0
+    rewards = []
+    try:
+        while True:
+            episode += 1
+            observation, _ = env.reset(seed=args.seed)
+            total_reward = 0.0
+            terminated = truncated = False
 
-    while not (terminated or truncated):
-        action = controller.get_action(observation)
-        observation, reward, terminated, truncated, _ = env.step(action)
-        total_reward += reward
+            while not (terminated or truncated):
+                action = controller.get_action(observation)
+                observation, reward, terminated, truncated, _ = env.step(action)
+                total_reward += float(reward)
 
-    env.close()
-    print(f"Episode finished. Total reward: {total_reward:.1f}")
+            rewards.append(total_reward)
+            successes = sum(r >= SUCCESS_REWARD_THRESHOLD for r in rewards)
+            print(
+                f"Episode {episode}: reward {total_reward:.1f}  "
+                f"(avg {sum(rewards) / len(rewards):.1f}, landed {successes}/{episode})"
+            )
+
+            if not args.loop:
+                break
+    except KeyboardInterrupt:
+        print("\nStopped.")
+    finally:
+        env.close()
 
 
 def cmd_train(args: argparse.Namespace) -> None:
@@ -56,6 +73,7 @@ def cmd_pid_search(args: argparse.Namespace) -> None:
         episodes_per_set=args.episodes,
         seed=args.seed,
         n_jobs=args.jobs,
+        output_dir=args.output_dir,
     )
 
 
@@ -80,6 +98,12 @@ def main() -> None:
     run_parser = subparsers.add_parser("run", help="Render a controller landing an episode")
     run_parser.add_argument("--controller", choices=["heuristic", "rl"], required=True)
     run_parser.add_argument("--seed", type=int, default=None)
+    run_parser.add_argument(
+        "--loop", action="store_true", help="Keep running episodes back-to-back until Ctrl+C"
+    )
+    run_parser.add_argument(
+        "--model", default=None, help="Checkpoint name in models/ for --controller rl (default: ppo_lunar_lander)"
+    )
     run_parser.set_defaults(func=cmd_run)
 
     train_parser = subparsers.add_parser("train", help="Train a PPO agent")
@@ -99,6 +123,7 @@ def main() -> None:
     pid_search_parser.add_argument(
         "--jobs", type=int, default=None, help="Parallel worker processes (default: CPU count)"
     )
+    pid_search_parser.add_argument("--output-dir", default="pid_search_results")
     pid_search_parser.set_defaults(func=cmd_pid_search)
 
     args = parser.parse_args()

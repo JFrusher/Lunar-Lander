@@ -13,21 +13,25 @@ class HeuristicController(BaseController):
     as class attributes so they can be tweaked without touching the logic.
     """
 
+    # Defaults from the Monte Carlo gain sweep (utils/pid_search.py), v2 run:
+    # 500 Latin-Hypercube samples x 50 episodes, best-found set
+    # (mean_reward 254.3, success 100%, crash 0%). See pid_search_results_v2/.
+
     # Horizontal position -> desired angle (radians)
-    ANGLE_GAIN_POS = 0.5
-    ANGLE_GAIN_VEL = 1.0
+    ANGLE_GAIN_POS = 0.5  # not swept, held at original default
+    ANGLE_GAIN_VEL = 1.175571804391529
 
     # Angle/angular-velocity -> desired angular action strength
-    ANGLE_ERROR_GAIN = 0.5
-    ANGULAR_VEL_GAIN = 1.0
+    ANGLE_ERROR_GAIN = 0.5  # not swept, held at original default
+    ANGULAR_VEL_GAIN = 1.0  # not swept, held at original default
 
     # Vertical descent speed target and gain
-    TARGET_DESCENT_SPEED = -0.15
-    DESCENT_GAIN = 0.5
+    TARGET_DESCENT_SPEED = -0.10534496960720757
+    DESCENT_GAIN = 1.3919415369112689
 
     # Thresholds that decide when to fire an engine
-    ANGLE_THRESHOLD = 0.05
-    HOVER_THRESHOLD = 0.05
+    ANGLE_THRESHOLD = 0.03654782964522024
+    HOVER_THRESHOLD = 0.12111246024626458
 
     def get_action(self, observation: Sequence[float]) -> int:
         x, y, vx, vy, angle, angular_vel, leg1, leg2 = observation

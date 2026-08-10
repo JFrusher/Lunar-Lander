@@ -17,12 +17,17 @@ import pandas as pd
 
 from utils.evaluation import CRASH_REWARD_THRESHOLD, SUCCESS_REWARD_THRESHOLD
 
-# Bounds for the four gains that most directly shape the descent trajectory.
+# Bounds for the gains that matter, per sweep-v1 analysis:
+# - ANGLE_GAIN_POS dropped: corr with reward was -0.04 in v1, fixed at its default.
+# - TARGET_DESCENT_SPEED widened: v1 best cluster sat at the -0.05 edge of the old range.
+# - DESCENT_GAIN widened: v1 top result (1.32) sat close to the old 1.5 ceiling.
+# - ANGLE_THRESHOLD / HOVER_THRESHOLD added: gate action selection directly, untested in v1.
 CORE_PARAM_SPACE: Dict[str, Tuple[float, float]] = {
-    "ANGLE_GAIN_POS": (0.1, 1.0),
     "ANGLE_GAIN_VEL": (0.2, 2.0),
-    "DESCENT_GAIN": (0.1, 1.5),
-    "TARGET_DESCENT_SPEED": (-0.40, -0.05),
+    "DESCENT_GAIN": (0.1, 2.0),
+    "TARGET_DESCENT_SPEED": (-0.40, -0.02),
+    "ANGLE_THRESHOLD": (0.01, 0.2),
+    "HOVER_THRESHOLD": (0.01, 0.2),
 }
 
 
@@ -66,7 +71,7 @@ def _evaluate_gain_set(args: Tuple[Dict[str, float], int, str]) -> Dict[str, flo
 
     env = gym.make(env_name)
     rewards, steps_taken = [], []
-    successes = crashes = 0
+    successes = crashes = timeouts = 0
 
     for seed in range(episodes):
         observation, _ = env.reset(seed=seed)
@@ -86,6 +91,8 @@ def _evaluate_gain_set(args: Tuple[Dict[str, float], int, str]) -> Dict[str, flo
             successes += 1
         elif terminated and total_reward <= -CRASH_REWARD_THRESHOLD:
             crashes += 1
+        if truncated:
+            timeouts += 1
 
     env.close()
 
@@ -96,6 +103,7 @@ def _evaluate_gain_set(args: Tuple[Dict[str, float], int, str]) -> Dict[str, flo
             "std_reward": float(np.std(rewards)),
             "success_rate_pct": 100 * successes / episodes,
             "crash_rate_pct": 100 * crashes / episodes,
+            "timeout_rate_pct": 100 * timeouts / episodes,
             "avg_steps": float(np.mean(steps_taken)),
         }
     )
@@ -103,13 +111,21 @@ def _evaluate_gain_set(args: Tuple[Dict[str, float], int, str]) -> Dict[str, flo
 
 
 def _plot_param_scatter(df: pd.DataFrame, param_names: List[str], path: Path) -> None:
-    fig, axes = plt.subplots(2, 2, figsize=(11, 9))
-    for ax, name in zip(axes.flat, param_names):
+    cols = min(3, len(param_names))
+    rows = -(-len(param_names) // cols)  # ceil
+    fig, axes = plt.subplots(rows, cols, figsize=(4.2 * cols, 4 * rows), squeeze=False)
+
+    scatter = None
+    for i, name in enumerate(param_names):
+        ax = axes.flat[i]
         scatter = ax.scatter(
             df[name], df["mean_reward"], c=df["success_rate_pct"], cmap="viridis", s=18
         )
         ax.set_xlabel(name)
         ax.set_ylabel("mean_reward")
+    for ax in axes.flat[len(param_names):]:
+        ax.set_visible(False)
+
     fig.colorbar(scatter, ax=axes, label="success_rate_pct", shrink=0.8)
     fig.suptitle("Gain Value vs. Mean Reward (color = success rate)")
     fig.savefig(path, dpi=150)
@@ -163,6 +179,19 @@ def run_monte_carlo(
 
     csv_path = out_dir / "pid_search_results.csv"
     df.to_csv(csv_path, index=False)
+
+    with open(out_dir / "sweep_manifest.json", "w") as f:
+        json.dump(
+            {
+                "env_name": env_name,
+                "n_samples": n_samples,
+                "episodes_per_set": episodes_per_set,
+                "seed": seed,
+                "param_space": param_space,
+            },
+            f,
+            indent=2,
+        )
 
     param_names = list(param_space.keys())
     _plot_param_scatter(df, param_names, out_dir / "pid_search_scatter.png")
