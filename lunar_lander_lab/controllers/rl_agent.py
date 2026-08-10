@@ -53,10 +53,10 @@ class RLAgent(BaseController):
         self.model.learn(total_timesteps=total_timesteps)
 
         run_dir = new_run_dir("train")
-        full_path = run_dir / save_path
+        full_path = run_dir / f"{save_path}.zip"
         self.model.save(str(full_path))
         env.close()
-        return str(full_path.with_suffix(".zip"))
+        return str(full_path)
 
     def load(self, model_path: str) -> None:
         """Load a previously trained PPO model.
