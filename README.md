@@ -6,19 +6,25 @@ reinforcement learning on Gymnasium's `LunarLander-v3`.
 ## Project Structure
 
 ```
-lunar_lander_lab/
+Lunar/
 ├── README.md
-├── requirements.txt
-├── main.py                  # CLI entry point
-├── controllers/
-│   ├── __init__.py
-│   ├── base.py               # BaseController abstract interface
-│   ├── heuristic.py          # HeuristicController: rule-based PID-style logic
-│   └── rl_agent.py           # RLAgent: PPO wrapper (Stable-Baselines3)
-├── utils/
-│   ├── __init__.py
-│   └── evaluation.py         # run_benchmark(): head-to-head controller comparison
-└── models/                   # Saved PPO checkpoints (.zip)
+├── pyproject.toml
+├── runs/                      # gitignored — all run output, kept forever
+│   ├── train/<timestamp>/     # PPO checkpoints (.zip)
+│   ├── pid_search/<timestamp>/ # gain-sweep datasets + plots
+│   └── benchmark/<timestamp>/ # comparison charts
+└── lunar_lander_lab/
+    ├── cli.py                 # CLI entry point
+    ├── configs/
+    │   └── heuristic_gains.json   # tuned heuristic gains, hand-updated from sweeps
+    ├── controllers/
+    │   ├── base.py             # BaseController abstract interface
+    │   ├── heuristic.py         # HeuristicController: rule-based PID-style logic
+    │   └── rl_agent.py          # RLAgent: PPO wrapper (Stable-Baselines3)
+    └── utils/
+        ├── paths.py             # runs/ directory helpers
+        ├── evaluation.py        # run_benchmark(): head-to-head controller comparison
+        └── pid_search.py        # Monte Carlo gain sweep
 ```
 
 ## Setup
@@ -27,7 +33,7 @@ lunar_lander_lab/
 python -m venv .venv
 .venv\Scripts\activate        # Windows
 source .venv/bin/activate     # macOS/Linux
-pip install -r requirements.txt
+pip install -e .
 ```
 
 Requires Python 3.10-3.12 (Box2D and PyTorch wheels; newer interpreters may
@@ -35,43 +41,61 @@ lack prebuilt wheels for these packages).
 
 ## CLI Usage
 
-Run from inside `lunar_lander_lab/`.
+Runnable from anywhere once installed, as `lunar-lander`, or from the repo
+root as `python -m lunar_lander_lab.cli`.
 
 ### Render a controller landing an episode
 
 ```bash
-python main.py run --controller heuristic
-python main.py run --controller rl
+lunar-lander run --controller heuristic
+lunar-lander run --controller rl
 ```
 
-Opens a Pygame window and renders one episode. `--controller rl` requires a
-trained model (see below).
+Opens a Pygame window and renders one episode. `--controller rl` loads the
+most recently trained checkpoint under `runs/train/` (or pass an explicit
+path with `--model`).
 
 ### Train a PPO agent
 
 ```bash
-python main.py train --timesteps 100000
+lunar-lander train --timesteps 100000
 ```
 
 Trains a PPO policy (Stable-Baselines3, `MlpPolicy`) on `LunarLander-v3` and
-saves the checkpoint to `models/ppo_lunar_lander.zip`.
+saves the checkpoint to `runs/train/<timestamp>/ppo_lunar_lander.zip`.
 
 ### Benchmark controllers side-by-side
 
 ```bash
-python main.py benchmark --episodes 50
+lunar-lander benchmark --episodes 50
 ```
 
 Runs the heuristic controller and (if trained) the PPO agent across the same
 set of seeds, prints a metrics table (mean reward, success/landing rate,
 average flight time, crash rate), and saves a comparison chart to
-`benchmark_results.png`.
+`runs/benchmark/<timestamp>/benchmark_results.png`.
+
+### Sweep heuristic gains
+
+```bash
+lunar-lander pid-search --samples 200 --episodes 30
+```
+
+Latin-Hypercube-samples the gain space, evaluates each set across seeded
+episodes (multiprocessed), and writes a dataset + plots to
+`runs/pid_search/<timestamp>/`.
+
+To apply a winning sweep: open `runs/pid_search/<timestamp>/best_gains.json`
+and hand-copy its `best_gains` values into
+`lunar_lander_lab/configs/heuristic_gains.json`. This is a deliberate manual
+step — a smaller or noisier sweep shouldn't be able to silently regress the
+tuned default.
 
 ## Controllers
 
 - **`HeuristicController`** — proportional control on horizontal position,
-  velocity, angle and descent speed. Gains are class attributes
-  (`ANGLE_GAIN_POS`, `DESCENT_GAIN`, etc.) for easy tuning.
+  velocity, angle and descent speed. Swept gains load from
+  `configs/heuristic_gains.json`; unswept gains are class attributes.
 - **`RLAgent`** — trains/loads a PPO model and selects actions via
   `model.predict(obs, deterministic=True)`.
 
