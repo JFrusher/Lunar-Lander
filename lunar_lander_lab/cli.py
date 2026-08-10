@@ -14,6 +14,7 @@ import gymnasium as gym
 from .controllers import HeuristicController, RLAgent
 from .utils.evaluation import SUCCESS_REWARD_THRESHOLD, run_benchmark
 from .utils.pid_search import run_monte_carlo
+from .utils.ppo_convergence import run_ppo_convergence_check
 from .utils.time_penalty import run_time_penalty_sweep
 
 DEFAULT_MODEL_NAME = "ppo_lunar_lander"
@@ -89,6 +90,13 @@ def cmd_time_penalty_sweep(args: argparse.Namespace) -> None:
     )
 
 
+def cmd_ppo_convergence_check(args: argparse.Namespace) -> None:
+    run_ppo_convergence_check(
+        eval_episodes=args.eval_episodes,
+        seed=args.seed,
+    )
+
+
 def cmd_benchmark(args: argparse.Namespace) -> None:
     controllers = {"Heuristic": HeuristicController()}
 
@@ -151,6 +159,14 @@ def main() -> None:
         "--jobs", type=int, default=None, help="Parallel worker processes for pid-search (default: CPU count)"
     )
     time_penalty_parser.set_defaults(func=cmd_time_penalty_sweep)
+
+    ppo_convergence_parser = subparsers.add_parser(
+        "ppo-convergence-check",
+        help="Train PPO at increasing timestep budgets and plot reward/success vs. timesteps",
+    )
+    ppo_convergence_parser.add_argument("--eval-episodes", type=int, default=30)
+    ppo_convergence_parser.add_argument("--seed", type=int, default=0)
+    ppo_convergence_parser.set_defaults(func=cmd_ppo_convergence_check)
 
     args = parser.parse_args()
     args.func(args)
