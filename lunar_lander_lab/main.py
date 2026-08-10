@@ -119,7 +119,7 @@ def main() -> None:
     )
     pid_search_parser.add_argument("--samples", type=int, default=200)
     pid_search_parser.add_argument("--episodes", type=int, default=30)
-    pid_search_parser.add_argument("--seed", type=int, default=0)
+    pid_search_parser.add_argument("--seed", type=int, default=4316)
     pid_search_parser.add_argument(
         "--jobs", type=int, default=None, help="Parallel worker processes (default: CPU count)"
     )
