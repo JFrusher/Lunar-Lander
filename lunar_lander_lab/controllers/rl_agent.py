@@ -1,7 +1,7 @@
 """PPO-based reinforcement learning controller (Stable-Baselines3)."""
 
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import Callable, Optional, Sequence
 
 import gymnasium as gym
 from stable_baselines3 import PPO
@@ -38,10 +38,16 @@ class RLAgent(BaseController):
         total_timesteps: int = 100_000,
         save_path: str = "ppo_lunar_lander",
         hyperparams: Optional[dict] = None,
+        env_wrapper: Optional[Callable[[gym.Env], gym.Env]] = None,
     ) -> str:
         """Train a PPO model from scratch and save the weights to runs/train/<timestamp>/."""
         params = {**DEFAULT_HYPERPARAMS, **(hyperparams or {})}
-        env = DummyVecEnv([lambda: gym.make(env_name)])
+
+        def make_env():
+            env = gym.make(env_name)
+            return env_wrapper(env) if env_wrapper else env
+
+        env = DummyVecEnv([make_env])
 
         self.model = PPO(env=env, **params)
         self.model.learn(total_timesteps=total_timesteps)
