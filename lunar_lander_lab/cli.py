@@ -13,7 +13,7 @@ import gymnasium as gym
 
 from .controllers import HeuristicController, RLAgent
 from .utils.evaluation import SUCCESS_REWARD_THRESHOLD, run_benchmark
-from .utils.pid_search import run_monte_carlo
+from .utils.pid_search import CORE_PARAM_SPACE, EXTENDED_PARAM_SPACE, run_monte_carlo
 from .utils.ppo_convergence import run_ppo_convergence_check
 from .utils.ppo_search import DEFAULT_TIMESTEPS, run_ppo_search
 from .utils.time_penalty import run_time_penalty_sweep
@@ -75,6 +75,8 @@ def cmd_pid_search(args: argparse.Namespace) -> None:
         n_samples=args.samples,
         episodes_per_set=args.episodes,
         seed=args.seed,
+        param_space=CORE_PARAM_SPACE if args.param_space == "core" else EXTENDED_PARAM_SPACE,
+        time_penalty=args.time_penalty,
         n_jobs=args.jobs,
         output_dir=args.output_dir,
     )
@@ -153,6 +155,14 @@ def main() -> None:
     pid_search_parser.add_argument("--seed", type=int, default=4316)
     pid_search_parser.add_argument(
         "--jobs", type=int, default=None, help="Parallel worker processes (default: CPU count)"
+    )
+    pid_search_parser.add_argument(
+        "--param-space", choices=["core", "extended"], default="core",
+        help="core = the 5 swept gains; extended = 8D, adding the 3 attitude gains",
+    )
+    pid_search_parser.add_argument(
+        "--time-penalty", type=float, default=0.0,
+        help="Per-step penalty applied when ranking gain sets (not during evaluation)",
     )
     pid_search_parser.add_argument("--output-dir", default=None)
     pid_search_parser.set_defaults(func=cmd_pid_search)

@@ -18,17 +18,16 @@ class HeuristicController(BaseController):
     as class attributes so they can be tweaked without touching the logic.
     """
 
-    # Swept gains: configs/heuristic_gains.json (see utils/pid_search.py to re-tune)
+    # All gains: configs/heuristic_gains.json (see utils/pid_search.py to re-tune)
     ANGLE_GAIN_VEL = _GAINS["ANGLE_GAIN_VEL"]
     DESCENT_GAIN = _GAINS["DESCENT_GAIN"]
     TARGET_DESCENT_SPEED = _GAINS["TARGET_DESCENT_SPEED"]
     ANGLE_THRESHOLD = _GAINS["ANGLE_THRESHOLD"]
     HOVER_THRESHOLD = _GAINS["HOVER_THRESHOLD"]
 
-    # Never swept, held at original defaults:
-    ANGLE_GAIN_POS = 0.5  # horizontal position -> desired angle
-    ANGLE_ERROR_GAIN = 0.5  # angle error -> angular correction
-    ANGULAR_VEL_GAIN = 1.0  # angular velocity damping
+    ANGLE_GAIN_POS = _GAINS["ANGLE_GAIN_POS"]  # horizontal position -> desired angle
+    ANGLE_ERROR_GAIN = _GAINS["ANGLE_ERROR_GAIN"]  # angle error -> angular correction
+    ANGULAR_VEL_GAIN = _GAINS["ANGULAR_VEL_GAIN"]  # angular velocity damping
 
     def get_action(self, observation: Sequence[float]) -> int:
         x, y, vx, vy, angle, angular_vel, leg1, leg2 = observation

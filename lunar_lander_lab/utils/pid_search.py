@@ -31,6 +31,17 @@ CORE_PARAM_SPACE: Dict[str, Tuple[float, float]] = {
     "HOVER_THRESHOLD": (0.01, 0.2),
 }
 
+# The three attitude gains sweep-v1 left hardcoded, bracketing their original
+# defaults (0.5 / 0.5 / 1.0) in both directions. ANGLE_GAIN_POS was dropped from
+# v1 on a -0.04 reward correlation, which is weak evidence for "doesn't matter"
+# when it was never varied jointly with the attitude gains it interacts with.
+EXTENDED_PARAM_SPACE: Dict[str, Tuple[float, float]] = {
+    **CORE_PARAM_SPACE,
+    "ANGLE_GAIN_POS": (0.1, 1.5),
+    "ANGLE_ERROR_GAIN": (0.1, 1.5),
+    "ANGULAR_VEL_GAIN": (0.2, 2.0),
+}
+
 
 def _latin_hypercube_unit(n_samples: int, n_dims: int, rng: np.random.Generator) -> np.ndarray:
     """Stratified samples in [0, 1)^n_dims: one random draw per bin per dim."""
