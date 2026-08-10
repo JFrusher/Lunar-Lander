@@ -69,9 +69,15 @@ def sample_gain_sets(
     return gain_sets
 
 
-def _evaluate_gain_set(args: Tuple[Dict[str, float], int, str]) -> Dict[str, float]:
+# Held-out episodes for re-scoring the search's top-k. Far clear of the
+# episode seeds the search itself ranks on (0..episodes_per_set-1), so a
+# winner can't be validated against the episodes that selected it.
+HOLDOUT_SEED_START = 10_000
+
+
+def _evaluate_gain_set(args: Tuple[Dict[str, float], int, str, int]) -> Dict[str, float]:
     """Run one gain set for `episodes` seeded episodes. Runs in a worker process."""
-    gains, episodes, env_name = args
+    gains, episodes, env_name, seed_start = args
 
     import gymnasium as gym
 
@@ -85,7 +91,7 @@ def _evaluate_gain_set(args: Tuple[Dict[str, float], int, str]) -> Dict[str, flo
     rewards, steps_taken, success_steps = [], [], []
     successes = crashes = timeouts = 0
 
-    for seed in range(episodes):
+    for seed in range(seed_start, seed_start + episodes):
         observation, _ = env.reset(seed=seed)
         total_reward = 0.0
         steps = 0
@@ -173,11 +179,18 @@ def run_monte_carlo(
     output_dir: Optional[str] = None,
     n_jobs: Optional[int] = None,
     time_penalty: float = 0.0,
+    holdout_top_k: int = 10,
+    holdout_episodes: int = 100,
 ) -> pd.DataFrame:
-    """Latin-Hypercube-sample `param_space`, evaluate each set, save dataset + plots."""
+    """Latin-Hypercube-sample `param_space`, evaluate each set, save dataset + plots.
+
+    The reported winner is chosen by re-scoring the top `holdout_top_k` on
+    `holdout_episodes` episodes the search never ranked against — see the
+    comment at the selection step for why.
+    """
     param_space = param_space or CORE_PARAM_SPACE
     gain_sets = sample_gain_sets(n_samples, param_space, seed=seed)
-    work_items = [(gains, episodes_per_set, env_name) for gains in gain_sets]
+    work_items = [(gains, episodes_per_set, env_name, 0) for gains in gain_sets]
 
     n_jobs = n_jobs or os.cpu_count() or 1
     results = []
@@ -204,6 +217,9 @@ def run_monte_carlo(
                 "seed": seed,
                 "param_space": param_space,
                 "time_penalty": time_penalty,
+                "holdout_top_k": holdout_top_k,
+                "holdout_episodes": holdout_episodes,
+                "holdout_seed_start": HOLDOUT_SEED_START,
             },
             f,
             indent=2,
@@ -214,15 +230,43 @@ def run_monte_carlo(
     _plot_correlation_heatmap(df, out_dir / "pid_search_correlation.png")
 
     penalized_score = df["mean_reward"] - time_penalty * df["avg_steps"]
-    best_row = df.loc[penalized_score.idxmax()]
+    search_best = df.loc[penalized_score.idxmax()]
+
+    # Ranking each gain set on the same episodes used to pick the winner
+    # inflates the winner's score, and the inflation grows with n_samples
+    # (measured at +6 reward for n=125 up to +31 for n=500). Re-score the
+    # top-k on episodes the search never saw, and let those decide.
+    k = min(holdout_top_k, len(df))
+    top_k = df.loc[penalized_score.nlargest(k).index]
+    holdout_items = [
+        ({name: float(row[name]) for name in param_names},
+         holdout_episodes, env_name, HOLDOUT_SEED_START)
+        for _, row in top_k.iterrows()
+    ]
+    print(f"Re-scoring top {k} on {holdout_episodes} held-out episodes...")
+    with multiprocessing.Pool(processes=min(n_jobs, k)) as pool:
+        holdout_df = pd.DataFrame(pool.map(_evaluate_gain_set, holdout_items))
+
+    holdout_df.to_csv(out_dir / "holdout_top_k.csv", index=False)
+    holdout_score = holdout_df["mean_reward"] - time_penalty * holdout_df["avg_steps"]
+    best_row = holdout_df.loc[holdout_score.idxmax()]
+
     summary = {
         "best_gains": {name: float(best_row[name]) for name in param_names},
+        # Metrics below are held-out: measured on episodes the search never
+        # ranked against. Use these when comparing across runs.
         "mean_reward": float(best_row["mean_reward"]),
         "success_rate_pct": float(best_row["success_rate_pct"]),
         "crash_rate_pct": float(best_row["crash_rate_pct"]),
         "avg_steps": float(best_row["avg_steps"]),
         "avg_steps_success": float(best_row["avg_steps_success"]),
         "time_penalty": time_penalty,
+        "holdout_episodes": holdout_episodes,
+        "holdout_top_k": k,
+        # What the old (search-set-only) selection would have reported, kept
+        # so the optimism is visible rather than silently corrected away.
+        "search_set_best_mean_reward": float(search_best["mean_reward"]),
+        "search_set_optimism": float(search_best["mean_reward"] - best_row["mean_reward"]),
     }
     with open(out_dir / "best_gains.json", "w") as f:
         json.dump(summary, f, indent=2)

@@ -1,5 +1,6 @@
 """Time-penalty reward shaping + sweep across controller types."""
 
+import json
 import math
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -11,7 +12,7 @@ import pandas as pd
 from ..controllers.base import BaseController
 from ..controllers.rl_agent import RLAgent
 from .paths import new_run_dir
-from .pid_search import run_monte_carlo
+from .pid_search import HOLDOUT_SEED_START, run_monte_carlo
 
 SUCCESS_REWARD_THRESHOLD = 200
 
@@ -141,25 +142,29 @@ def run_time_penalty_sweep(
 
     for i, p in enumerate(penalties):
         print(f"\n=== Heuristic, penalty={p} ===")
-        gains_df = run_monte_carlo(
+        run_dir = sweep_dir / f"heuristic_penalty_{p}"
+        run_monte_carlo(
             n_samples=pid_samples,
             episodes_per_set=pid_episodes,
             seed=seed + i,
             time_penalty=p,
-            output_dir=str(sweep_dir / f"heuristic_penalty_{p}"),
+            output_dir=str(run_dir),
             n_jobs=n_jobs,
+            holdout_episodes=eval_episodes,
         )
-        penalized_score = gains_df["mean_reward"] - p * gains_df["avg_steps"]
-        best = gains_df.loc[penalized_score.idxmax()]
+        # Read the winner run_monte_carlo already picked on held-out episodes.
+        # Re-deriving it here from the returned frame would re-introduce the
+        # search-set-only argmax that selection is meant to avoid.
+        best = json.loads((run_dir / "best_gains.json").read_text())
         rows.append(
             {
                 "controller": "Heuristic",
                 "penalty": p,
-                "mean_reward": float(best["mean_reward"]),
-                "success_rate_pct": float(best["success_rate_pct"]),
-                "crash_rate_pct": float(best["crash_rate_pct"]),
-                "avg_landing_steps": float(best["avg_steps_success"]),
-                "detail": str(sweep_dir / f"heuristic_penalty_{p}" / "best_gains.json"),
+                "mean_reward": best["mean_reward"],
+                "success_rate_pct": best["success_rate_pct"],
+                "crash_rate_pct": best["crash_rate_pct"],
+                "avg_landing_steps": best["avg_steps_success"],
+                "detail": str(run_dir / "best_gains.json"),
             }
         )
 
@@ -176,7 +181,11 @@ def run_time_penalty_sweep(
             # init/rollout noise.
             hyperparams={"seed": seed},
         )
-        metrics = evaluate_controller_natural(agent, eval_episodes, seed_start=seed)
+        # Same episodes the heuristic leg is now scored on, so the two lines on
+        # the trade-off plot are measured against an identical set of landings.
+        metrics = evaluate_controller_natural(
+            agent, eval_episodes, seed_start=HOLDOUT_SEED_START
+        )
         rows.append({"controller": "RL (PPO)", "penalty": p, "detail": saved_path, **metrics})
 
     df_results = pd.DataFrame(rows)
