@@ -139,12 +139,12 @@ def run_time_penalty_sweep(
     sweep_dir = Path(output_dir) if output_dir else new_run_dir("time_penalty_sweep")
     rows = []
 
-    for p in penalties:
+    for i, p in enumerate(penalties):
         print(f"\n=== Heuristic, penalty={p} ===")
         gains_df = run_monte_carlo(
             n_samples=pid_samples,
             episodes_per_set=pid_episodes,
-            seed=seed,
+            seed=seed + i,
             time_penalty=p,
             output_dir=str(sweep_dir / f"heuristic_penalty_{p}"),
             n_jobs=n_jobs,
@@ -170,6 +170,11 @@ def run_time_penalty_sweep(
             total_timesteps=rl_timesteps,
             save_path=f"ppo_penalty_{p}",
             env_wrapper=lambda env, p=p: TimePenaltyWrapper(env, p),
+            # Same PPO seed at every penalty level (not varied like the heuristic's
+            # search seed above) — isolates the penalty as the only thing that
+            # differs between runs, instead of confounding it with random network
+            # init/rollout noise.
+            hyperparams={"seed": seed},
         )
         metrics = evaluate_controller_natural(agent, eval_episodes, seed_start=seed)
         rows.append({"controller": "RL (PPO)", "penalty": p, "detail": saved_path, **metrics})
