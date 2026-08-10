@@ -15,6 +15,7 @@ from .controllers import HeuristicController, RLAgent
 from .utils.evaluation import SUCCESS_REWARD_THRESHOLD, run_benchmark
 from .utils.pid_search import run_monte_carlo
 from .utils.ppo_convergence import run_ppo_convergence_check
+from .utils.ppo_search import DEFAULT_TIMESTEPS, run_ppo_search
 from .utils.time_penalty import run_time_penalty_sweep
 
 DEFAULT_MODEL_NAME = "ppo_lunar_lander"
@@ -97,6 +98,16 @@ def cmd_ppo_convergence_check(args: argparse.Namespace) -> None:
     )
 
 
+def cmd_hparam_search(args: argparse.Namespace) -> None:
+    run_ppo_search(
+        n_samples=args.samples,
+        total_timesteps=args.timesteps,
+        eval_episodes=args.eval_episodes,
+        seed=args.seed,
+        n_jobs=args.jobs,
+    )
+
+
 def cmd_benchmark(args: argparse.Namespace) -> None:
     controllers = {"Heuristic": HeuristicController()}
 
@@ -167,6 +178,18 @@ def main() -> None:
     ppo_convergence_parser.add_argument("--eval-episodes", type=int, default=30)
     ppo_convergence_parser.add_argument("--seed", type=int, default=0)
     ppo_convergence_parser.set_defaults(func=cmd_ppo_convergence_check)
+
+    hparam_parser = subparsers.add_parser(
+        "hparam-search", help="Monte Carlo sweep of PPO hyperparameters"
+    )
+    hparam_parser.add_argument("--samples", type=int, default=12)
+    hparam_parser.add_argument("--timesteps", type=int, default=DEFAULT_TIMESTEPS)
+    hparam_parser.add_argument("--eval-episodes", type=int, default=30)
+    hparam_parser.add_argument("--seed", type=int, default=0)
+    hparam_parser.add_argument(
+        "--jobs", type=int, default=None, help="Parallel worker processes (default: CPU count)"
+    )
+    hparam_parser.set_defaults(func=cmd_hparam_search)
 
     args = parser.parse_args()
     args.func(args)
