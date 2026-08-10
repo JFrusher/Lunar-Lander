@@ -16,7 +16,7 @@ from .utils.evaluation import SUCCESS_REWARD_THRESHOLD, run_benchmark
 from .utils.pid_search import CORE_PARAM_SPACE, EXTENDED_PARAM_SPACE, run_monte_carlo
 from .utils.ppo_convergence import run_ppo_convergence_check
 from .utils.ppo_search import DEFAULT_TIMESTEPS, run_ppo_search
-from .utils.time_penalty import run_time_penalty_sweep
+from .utils.time_penalty import run_multi_seed_sweep, run_time_penalty_sweep
 
 DEFAULT_MODEL_NAME = "ppo_lunar_lander"
 
@@ -89,6 +89,17 @@ def cmd_time_penalty_sweep(args: argparse.Namespace) -> None:
         pid_episodes=args.pid_episodes,
         eval_episodes=args.eval_episodes,
         seed=args.seed,
+        n_jobs=args.jobs,
+    )
+
+
+def cmd_multi_seed_sweep(args: argparse.Namespace) -> None:
+    run_multi_seed_sweep(
+        seeds=args.seeds,
+        rl_timesteps=args.rl_timesteps,
+        pid_samples=args.pid_samples,
+        pid_episodes=args.pid_episodes,
+        eval_episodes=args.eval_episodes,
         n_jobs=args.jobs,
     )
 
@@ -180,6 +191,18 @@ def main() -> None:
         "--jobs", type=int, default=None, help="Parallel worker processes for pid-search (default: CPU count)"
     )
     time_penalty_parser.set_defaults(func=cmd_time_penalty_sweep)
+
+    multi_seed_parser = subparsers.add_parser(
+        "multi-seed-sweep",
+        help="Time-penalty sweep repeated across seeds, aggregated to mean ± std",
+    )
+    multi_seed_parser.add_argument("--seeds", type=int, nargs="+", default=[0, 100, 200])
+    multi_seed_parser.add_argument("--rl-timesteps", type=int, default=1_000_000)
+    multi_seed_parser.add_argument("--pid-samples", type=int, default=200)
+    multi_seed_parser.add_argument("--pid-episodes", type=int, default=30)
+    multi_seed_parser.add_argument("--eval-episodes", type=int, default=100)
+    multi_seed_parser.add_argument("--jobs", type=int, default=None)
+    multi_seed_parser.set_defaults(func=cmd_multi_seed_sweep)
 
     ppo_convergence_parser = subparsers.add_parser(
         "ppo-convergence-check",

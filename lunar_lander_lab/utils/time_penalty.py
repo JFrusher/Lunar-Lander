@@ -2,8 +2,10 @@
 
 import json
 import math
+import multiprocessing
+import os
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Sequence
 
 import gymnasium as gym
 import matplotlib.pyplot as plt
@@ -85,16 +87,19 @@ def evaluate_controller_natural(
     }
 
 
-def _plot_tradeoff(df: pd.DataFrame, path: Path) -> None:
-    fig, (ax_steps, ax_reward) = plt.subplots(1, 2, figsize=(11, 4.5), facecolor=_SURFACE)
-
-    for ax in (ax_steps, ax_reward):
+def _style_axes(*axes) -> None:
+    for ax in axes:
         ax.set_facecolor(_SURFACE)
         ax.grid(True, color=_GRID, linewidth=0.8)
         ax.set_axisbelow(True)
         for spine in ax.spines.values():
             spine.set_color(_GRID)
         ax.tick_params(colors=_INK_MUTED)
+
+
+def _plot_tradeoff(df: pd.DataFrame, path: Path) -> None:
+    fig, (ax_steps, ax_reward) = plt.subplots(1, 2, figsize=(11, 4.5), facecolor=_SURFACE)
+    _style_axes(ax_steps, ax_reward)
 
     for controller, group in df.groupby("controller"):
         group = group.sort_values("penalty")
@@ -199,6 +204,160 @@ def run_time_penalty_sweep(
     print(f"Plot:    {plot_path}")
     print(df_results.to_string(index=False))
     return df_results
+
+
+def aggregate_seeds(df_raw: pd.DataFrame) -> pd.DataFrame:
+    """Collapse per-seed rows into mean ± std per (controller, penalty).
+
+    Flattens pandas' MultiIndex columns to `<metric>_mean` / `<metric>_std`,
+    which is the contract `_plot_tradeoff_with_error_bars` reads.
+    """
+    metrics = ["mean_reward", "success_rate_pct", "crash_rate_pct", "avg_landing_steps"]
+    agg = df_raw.groupby(["controller", "penalty"])[metrics].agg(["mean", "std"]).reset_index()
+    agg.columns = ["_".join(c).rstrip("_") for c in agg.columns]
+    return agg
+
+
+def _train_and_eval_rl(args: tuple) -> Dict[str, float]:
+    """Train one PPO model at (seed, penalty) and evaluate it. Runs in a worker."""
+    seed, penalty, rl_timesteps, eval_episodes = args
+
+    import torch
+
+    # One thread per worker; torch's default of 4 oversubscribes the CPU
+    # several times over once the pool is saturated (same as ppo_search).
+    torch.set_num_threads(1)
+
+    agent = RLAgent()
+    saved_path = agent.train(
+        total_timesteps=rl_timesteps,
+        save_path=f"ppo_p{penalty}_s{seed}",
+        env_wrapper=lambda env, p=penalty: TimePenaltyWrapper(env, p),
+        hyperparams={"seed": seed, "verbose": 0},
+    )
+    metrics = evaluate_controller_natural(agent, eval_episodes, seed_start=HOLDOUT_SEED_START)
+    return {
+        "controller": "RL (PPO)",
+        "penalty": penalty,
+        "seed": seed,
+        "detail": saved_path,
+        **metrics,
+    }
+
+
+def _plot_tradeoff_with_error_bars(agg: pd.DataFrame, path: Path, n_seeds: int) -> None:
+    fig, (ax_steps, ax_reward) = plt.subplots(1, 2, figsize=(11, 4.5), facecolor=_SURFACE)
+    _style_axes(ax_steps, ax_reward)
+
+    for controller, group in agg.groupby("controller"):
+        group = group.sort_values("penalty")
+        color = _CONTROLLER_COLORS.get(controller, "#4a3aa7")
+        for ax, metric in ((ax_steps, "avg_landing_steps"), (ax_reward, "mean_reward")):
+            ax.errorbar(
+                group["penalty"], group[f"{metric}_mean"], yerr=group[f"{metric}_std"],
+                marker="o", markersize=7, linewidth=2, color=color, label=controller,
+                capsize=4, elinewidth=1.4,
+            )
+
+    ax_steps.set_xlabel("time penalty (per step)", color=_INK_PRIMARY)
+    ax_steps.set_ylabel("avg landing steps (successful episodes)", color=_INK_PRIMARY)
+    ax_steps.set_title("Landing Speed vs. Penalty", color=_INK_PRIMARY)
+
+    ax_reward.set_xlabel("time penalty (per step)", color=_INK_PRIMARY)
+    ax_reward.set_ylabel("mean reward (natural, held-out)", color=_INK_PRIMARY)
+    ax_reward.set_title("Reward vs. Penalty", color=_INK_PRIMARY)
+
+    handles, labels = ax_steps.get_legend_handles_labels()
+    fig.legend(handles[:2], labels[:2], loc="upper center", ncol=2,
+               bbox_to_anchor=(0.5, 1.06), frameon=False)
+    fig.suptitle(
+        f"Time-Penalty Sweep: Landing Speed / Reward Trade-off "
+        f"(mean ± std over {n_seeds} seeds)",
+        color=_INK_PRIMARY, y=1.16,
+    )
+    fig.tight_layout()
+    fig.savefig(path, dpi=150, facecolor=_SURFACE, bbox_inches="tight")
+    plt.close(fig)
+
+
+def run_multi_seed_sweep(
+    penalties: List[float] = TIME_PENALTY_COEFS,
+    seeds: Sequence[int] = (0, 100, 200),
+    rl_timesteps: int = 1_000_000,
+    pid_samples: int = 200,
+    pid_episodes: int = 30,
+    eval_episodes: int = 100,
+    n_jobs: Optional[int] = None,
+    output_dir: Optional[str] = None,
+) -> pd.DataFrame:
+    """Repeat the time-penalty sweep across `seeds` and aggregate mean ± std.
+
+    Single point-estimates have already misled twice in this project (the
+    fixed-seed Latin Hypercube, and PPO trained below its convergence floor),
+    so the headline trade-off chart gets error bars rather than one line.
+
+    Deviates from the roadmap's "just call run_time_penalty_sweep N times":
+    that trains PPO serially, which measured out at ~6 h for 18 models. The
+    RL leg is pooled across (seed, penalty) instead — ~2 h for the same work.
+    """
+    sweep_dir = Path(output_dir) if output_dir else new_run_dir("multi_seed_sweep")
+    n_jobs = n_jobs or os.cpu_count() or 1
+    rows: List[Dict[str, float]] = []
+
+    for base_seed in seeds:
+        for i, p in enumerate(penalties):
+            print(f"\n=== Heuristic, penalty={p}, seed={base_seed} ===")
+            run_dir = sweep_dir / f"heuristic_p{p}_s{base_seed}"
+            run_monte_carlo(
+                n_samples=pid_samples,
+                episodes_per_set=pid_episodes,
+                # Search seed varies per penalty level AND per repeat — the
+                # Phase 0 fix, extended so repeats aren't identical either.
+                seed=base_seed + i,
+                time_penalty=p,
+                output_dir=str(run_dir),
+                n_jobs=n_jobs,
+                holdout_episodes=eval_episodes,
+            )
+            best = json.loads((run_dir / "best_gains.json").read_text())
+            rows.append(
+                {
+                    "controller": "Heuristic",
+                    "penalty": p,
+                    "seed": base_seed,
+                    "mean_reward": best["mean_reward"],
+                    "success_rate_pct": best["success_rate_pct"],
+                    "crash_rate_pct": best["crash_rate_pct"],
+                    "avg_landing_steps": best["avg_steps_success"],
+                    "detail": str(run_dir / "best_gains.json"),
+                }
+            )
+
+    rl_items = [
+        (base_seed, p, rl_timesteps, eval_episodes) for base_seed in seeds for p in penalties
+    ]
+    print(f"\n=== RL (PPO): {len(rl_items)} models x {rl_timesteps:,} timesteps "
+          f"on {n_jobs} workers ===")
+    with multiprocessing.Pool(processes=n_jobs) as pool:
+        for i, result in enumerate(pool.imap_unordered(_train_and_eval_rl, rl_items), 1):
+            rows.append(result)
+            print(f"  [{i}/{len(rl_items)}] penalty={result['penalty']} "
+                  f"seed={result['seed']} reward={result['mean_reward']:.1f}")
+
+    df_raw = pd.DataFrame(rows)
+    df_raw.to_csv(sweep_dir / "multi_seed_raw.csv", index=False)
+
+    agg = aggregate_seeds(df_raw)
+    agg.to_csv(sweep_dir / "multi_seed_aggregated.csv", index=False)
+
+    plot_path = sweep_dir / "time_penalty_tradeoff_errorbars.png"
+    _plot_tradeoff_with_error_bars(agg, plot_path, n_seeds=len(seeds))
+
+    print(f"\nRaw:        {sweep_dir / 'multi_seed_raw.csv'}")
+    print(f"Aggregated: {sweep_dir / 'multi_seed_aggregated.csv'}")
+    print(f"Plot:       {plot_path}")
+    print(agg.to_string(index=False))
+    return agg
 
 
 if __name__ == "__main__":
