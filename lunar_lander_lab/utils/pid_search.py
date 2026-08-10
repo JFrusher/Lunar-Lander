@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 
 from .evaluation import CRASH_REWARD_THRESHOLD, SUCCESS_REWARD_THRESHOLD
+from .paths import new_run_dir
 
 # Bounds for the gains that matter, per sweep-v1 analysis:
 # - ANGLE_GAIN_POS dropped: corr with reward was -0.04 in v1, fixed at its default.
@@ -156,7 +157,7 @@ def run_monte_carlo(
     seed: int = 0,
     env_name: str = "LunarLander-v3",
     param_space: Optional[Dict[str, Tuple[float, float]]] = None,
-    output_dir: str = "pid_search_results",
+    output_dir: Optional[str] = None,
     n_jobs: Optional[int] = None,
 ) -> pd.DataFrame:
     """Latin-Hypercube-sample `param_space`, evaluate each set, save dataset + plots."""
@@ -174,7 +175,7 @@ def run_monte_carlo(
                 print(f"  [{i}/{n_samples}] evaluated")
 
     df = pd.DataFrame(results)
-    out_dir = Path(output_dir)
+    out_dir = Path(output_dir) if output_dir else new_run_dir("pid_search")
     out_dir.mkdir(parents=True, exist_ok=True)
 
     csv_path = out_dir / "pid_search_results.csv"

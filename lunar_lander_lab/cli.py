@@ -123,7 +123,7 @@ def main() -> None:
     pid_search_parser.add_argument(
         "--jobs", type=int, default=None, help="Parallel worker processes (default: CPU count)"
     )
-    pid_search_parser.add_argument("--output-dir", default="pid_search_results")
+    pid_search_parser.add_argument("--output-dir", default=None)
     pid_search_parser.set_defaults(func=cmd_pid_search)
 
     args = parser.parse_args()
