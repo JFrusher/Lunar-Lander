@@ -1,8 +1,13 @@
 """Rule-based PID-style controller for LunarLander-v3."""
 
+import json
+from pathlib import Path
 from typing import Sequence
 
 from .base import BaseController
+
+_GAINS_PATH = Path(__file__).resolve().parent.parent / "configs" / "heuristic_gains.json"
+_GAINS = json.loads(_GAINS_PATH.read_text())
 
 
 class HeuristicController(BaseController):
@@ -13,25 +18,17 @@ class HeuristicController(BaseController):
     as class attributes so they can be tweaked without touching the logic.
     """
 
-    # Defaults from the Monte Carlo gain sweep (utils/pid_search.py), v2 run:
-    # 500 Latin-Hypercube samples x 50 episodes, best-found set
-    # (mean_reward 254.3, success 100%, crash 0%). See pid_search_results_v2/.
+    # Swept gains: configs/heuristic_gains.json (see utils/pid_search.py to re-tune)
+    ANGLE_GAIN_VEL = _GAINS["ANGLE_GAIN_VEL"]
+    DESCENT_GAIN = _GAINS["DESCENT_GAIN"]
+    TARGET_DESCENT_SPEED = _GAINS["TARGET_DESCENT_SPEED"]
+    ANGLE_THRESHOLD = _GAINS["ANGLE_THRESHOLD"]
+    HOVER_THRESHOLD = _GAINS["HOVER_THRESHOLD"]
 
-    # Horizontal position -> desired angle (radians)
-    ANGLE_GAIN_POS = 0.5  # not swept, held at original default
-    ANGLE_GAIN_VEL = 1.175571804391529
-
-    # Angle/angular-velocity -> desired angular action strength
-    ANGLE_ERROR_GAIN = 0.5  # not swept, held at original default
-    ANGULAR_VEL_GAIN = 1.0  # not swept, held at original default
-
-    # Vertical descent speed target and gain
-    TARGET_DESCENT_SPEED = -0.10534496960720757
-    DESCENT_GAIN = 1.3919415369112689
-
-    # Thresholds that decide when to fire an engine
-    ANGLE_THRESHOLD = 0.03654782964522024
-    HOVER_THRESHOLD = 0.12111246024626458
+    # Never swept, held at original defaults:
+    ANGLE_GAIN_POS = 0.5  # horizontal position -> desired angle
+    ANGLE_ERROR_GAIN = 0.5  # angle error -> angular correction
+    ANGULAR_VEL_GAIN = 1.0  # angular velocity damping
 
     def get_action(self, observation: Sequence[float]) -> int:
         x, y, vx, vy, angle, angular_vel, leg1, leg2 = observation
