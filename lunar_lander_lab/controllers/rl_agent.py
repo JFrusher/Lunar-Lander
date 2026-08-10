@@ -10,7 +10,11 @@ from stable_baselines3.common.vec_env import DummyVecEnv
 from .base import BaseController
 from ..utils.paths import latest_run_file, new_run_dir
 
-# Default PPO hyperparameters, tuned as a reasonable starting point for LunarLander.
+# Default PPO hyperparameters for LunarLander. Not claimed optimal — but they
+# survived a 12-config Latin-Hypercube challenge of the surrounding space at
+# 1M timesteps (see `ppo_search.py`), where no sample beat them: best sampled
+# was 248.0 reward / 90% success vs. 277.0 / 100% here. Single seed, so read
+# this as "not yet beaten", not "best".
 DEFAULT_HYPERPARAMS = {
     "policy": "MlpPolicy",
     "learning_rate": 3e-4,
