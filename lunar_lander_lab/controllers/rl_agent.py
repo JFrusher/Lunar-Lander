@@ -8,8 +8,7 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv
 
 from .base import BaseController
-
-MODELS_DIR = Path(__file__).resolve().parent.parent / "models"
+from ..utils.paths import latest_run_file, new_run_dir
 
 # Default PPO hyperparameters, tuned as a reasonable starting point for LunarLander.
 DEFAULT_HYPERPARAMS = {
@@ -40,24 +39,29 @@ class RLAgent(BaseController):
         save_path: str = "ppo_lunar_lander",
         hyperparams: Optional[dict] = None,
     ) -> str:
-        """Train a PPO model from scratch and save the weights to models/."""
+        """Train a PPO model from scratch and save the weights to runs/train/<timestamp>/."""
         params = {**DEFAULT_HYPERPARAMS, **(hyperparams or {})}
         env = DummyVecEnv([lambda: gym.make(env_name)])
 
         self.model = PPO(env=env, **params)
         self.model.learn(total_timesteps=total_timesteps)
 
-        MODELS_DIR.mkdir(parents=True, exist_ok=True)
-        full_path = MODELS_DIR / save_path
+        run_dir = new_run_dir("train")
+        full_path = run_dir / save_path
         self.model.save(str(full_path))
         env.close()
         return str(full_path.with_suffix(".zip"))
 
     def load(self, model_path: str) -> None:
-        """Load a previously trained PPO model."""
+        """Load a previously trained PPO model.
+
+        `model_path` may be an existing file path, or a checkpoint name
+        (e.g. "ppo_lunar_lander") to resolve against the most recent
+        runs/train/*/<name>.zip.
+        """
         path = Path(model_path)
-        if not path.is_absolute() and not path.exists():
-            path = MODELS_DIR / model_path
+        if not path.exists():
+            path = latest_run_file("train", f"{model_path}.zip")
         self.model = PPO.load(str(path))
 
     def get_action(self, observation: Sequence[float]) -> int:
