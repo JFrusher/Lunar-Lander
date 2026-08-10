@@ -71,7 +71,7 @@ def _evaluate_gain_set(args: Tuple[Dict[str, float], int, str]) -> Dict[str, flo
         setattr(controller, name, value)
 
     env = gym.make(env_name)
-    rewards, steps_taken = [], []
+    rewards, steps_taken, success_steps = [], [], []
     successes = crashes = timeouts = 0
 
     for seed in range(episodes):
@@ -90,6 +90,7 @@ def _evaluate_gain_set(args: Tuple[Dict[str, float], int, str]) -> Dict[str, flo
         steps_taken.append(steps)
         if total_reward >= SUCCESS_REWARD_THRESHOLD:
             successes += 1
+            success_steps.append(steps)
         elif terminated and total_reward <= -CRASH_REWARD_THRESHOLD:
             crashes += 1
         if truncated:
@@ -106,6 +107,7 @@ def _evaluate_gain_set(args: Tuple[Dict[str, float], int, str]) -> Dict[str, flo
             "crash_rate_pct": 100 * crashes / episodes,
             "timeout_rate_pct": 100 * timeouts / episodes,
             "avg_steps": float(np.mean(steps_taken)),
+            "avg_steps_success": float(np.mean(success_steps)) if success_steps else float("nan"),
         }
     )
     return result
@@ -159,6 +161,7 @@ def run_monte_carlo(
     param_space: Optional[Dict[str, Tuple[float, float]]] = None,
     output_dir: Optional[str] = None,
     n_jobs: Optional[int] = None,
+    time_penalty: float = 0.0,
 ) -> pd.DataFrame:
     """Latin-Hypercube-sample `param_space`, evaluate each set, save dataset + plots."""
     param_space = param_space or CORE_PARAM_SPACE
@@ -189,6 +192,7 @@ def run_monte_carlo(
                 "episodes_per_set": episodes_per_set,
                 "seed": seed,
                 "param_space": param_space,
+                "time_penalty": time_penalty,
             },
             f,
             indent=2,
@@ -198,13 +202,16 @@ def run_monte_carlo(
     _plot_param_scatter(df, param_names, out_dir / "pid_search_scatter.png")
     _plot_correlation_heatmap(df, out_dir / "pid_search_correlation.png")
 
-    best_row = df.sort_values(["mean_reward", "success_rate_pct"], ascending=False).iloc[0]
+    penalized_score = df["mean_reward"] - time_penalty * df["avg_steps"]
+    best_row = df.loc[penalized_score.idxmax()]
     summary = {
         "best_gains": {name: float(best_row[name]) for name in param_names},
         "mean_reward": float(best_row["mean_reward"]),
         "success_rate_pct": float(best_row["success_rate_pct"]),
         "crash_rate_pct": float(best_row["crash_rate_pct"]),
         "avg_steps": float(best_row["avg_steps"]),
+        "avg_steps_success": float(best_row["avg_steps_success"]),
+        "time_penalty": time_penalty,
     }
     with open(out_dir / "best_gains.json", "w") as f:
         json.dump(summary, f, indent=2)
