@@ -10,7 +10,7 @@ def test_to_hyperparams_respects_bounds():
         assert 1e-4 <= hp["learning_rate"] <= 1e-3
         assert 512 - 64 <= hp["n_steps"] <= 4096 + 64
         assert 0.0 <= hp["ent_coef"] <= 0.05
-        assert 0.99 <= hp["gamma"] <= 0.999
+        assert 0.99 <= hp["gamma"] <= 0.9999
         assert 0.9 <= hp["gae_lambda"] <= 0.99
 
 
@@ -30,6 +30,18 @@ def test_learning_rate_is_log_uniform():
     lrs = [to_hyperparams(s)["learning_rate"] for s in sample_gain_sets(200, PPO_PARAM_SPACE, seed=2)]
     below = sum(lr < 10 ** -3.5 for lr in lrs)
     assert 0.4 <= below / len(lrs) <= 0.6, below / len(lrs)
+
+
+def test_gamma_range_brackets_the_default_instead_of_bounding_it():
+    """The first sweep pinned gamma's upper bound at the default's own value.
+
+    Sampling log10(1-gamma) must put the 0.999 default strictly inside the
+    range, so the search can actually test above it.
+    """
+    gammas = [to_hyperparams(s)["gamma"] for s in sample_gain_sets(200, PPO_PARAM_SPACE, seed=3)]
+    assert min(gammas) < 0.999 < max(gammas)
+    assert min(gammas) >= 0.99
+    assert max(gammas) <= 0.9999
 
 
 def test_ranking_picks_highest_mean_reward():

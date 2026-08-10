@@ -24,11 +24,17 @@ from .pid_search import sample_gain_sets
 
 # `learning_rate` is sampled log-uniformly (as log10) — a linear sweep of
 # 1e-4..1e-3 would spend 90% of its samples above 5e-4.
+#
+# `gamma` is sampled as log10(1 - gamma) for the same reason, and because the
+# first sweep bounded it at (0.99, 0.999) with the default sitting exactly on
+# the upper edge — so the search structurally could not test whether the
+# default was at a boundary optimum. log10(1-gamma) in (-4, -2) spans
+# gamma 0.99 .. 0.9999, putting the old 0.999 default mid-range.
 PPO_PARAM_SPACE: Dict[str, Tuple[float, float]] = {
     "learning_rate_log10": (-4.0, -3.0),
     "n_steps": (512, 4096),
     "ent_coef": (0.0, 0.05),
-    "gamma": (0.99, 0.999),
+    "one_minus_gamma_log10": (-4.0, -2.0),
     "gae_lambda": (0.9, 0.99),
 }
 
@@ -47,7 +53,7 @@ def to_hyperparams(sample: Dict[str, float]) -> Dict[str, float]:
         "learning_rate": 10 ** sample["learning_rate_log10"],
         "n_steps": max(_BATCH_SIZE, round(sample["n_steps"] / _BATCH_SIZE) * _BATCH_SIZE),
         "ent_coef": sample["ent_coef"],
-        "gamma": sample["gamma"],
+        "gamma": 1 - 10 ** sample["one_minus_gamma_log10"],
         "gae_lambda": sample["gae_lambda"],
     }
 
@@ -137,5 +143,5 @@ if __name__ == "__main__":
         hp = to_hyperparams(sample)
         assert 1e-4 <= hp["learning_rate"] <= 1e-3, hp
         assert hp["n_steps"] % _BATCH_SIZE == 0, hp
-        assert 0.99 <= hp["gamma"] <= 0.999, hp
+        assert 0.99 <= hp["gamma"] <= 0.9999, hp
     print("ppo_search self-check OK")
