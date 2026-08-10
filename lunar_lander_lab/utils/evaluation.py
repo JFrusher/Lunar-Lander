@@ -1,12 +1,13 @@
 """Benchmarking utilities: run controllers head-to-head and compare metrics."""
 
-from typing import Dict
+from typing import Dict, Optional
 
 import gymnasium as gym
 import matplotlib.pyplot as plt
 import pandas as pd
 
 from ..controllers.base import BaseController
+from .paths import new_run_dir
 
 # A landing is considered successful once the episode's total reward crosses
 # this threshold (LunarLander awards +100 for a safe landing on top of the
@@ -21,13 +22,17 @@ def run_benchmark(
     controllers: Dict[str, BaseController],
     env_name: str = "LunarLander-v3",
     num_episodes: int = 50,
-    plot_path: str = "benchmark_results.png",
+    plot_path: Optional[str] = None,
 ) -> pd.DataFrame:
     """Evaluate each controller over the same set of episode seeds.
 
     Returns a DataFrame of per-controller summary metrics and writes a
-    comparison bar chart to ``plot_path``.
+    comparison bar chart to ``plot_path`` (default: a new
+    runs/benchmark/<timestamp>/benchmark_results.png).
     """
+    if plot_path is None:
+        plot_path = str(new_run_dir("benchmark") / "benchmark_results.png")
+
     seeds = list(range(num_episodes))
     env = gym.make(env_name)
 
