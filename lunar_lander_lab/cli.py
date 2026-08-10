@@ -14,6 +14,7 @@ import gymnasium as gym
 from .controllers import HeuristicController, RLAgent
 from .utils.evaluation import SUCCESS_REWARD_THRESHOLD, run_benchmark
 from .utils.pid_search import run_monte_carlo
+from .utils.time_penalty import run_time_penalty_sweep
 
 DEFAULT_MODEL_NAME = "ppo_lunar_lander"
 
@@ -77,6 +78,17 @@ def cmd_pid_search(args: argparse.Namespace) -> None:
     )
 
 
+def cmd_time_penalty_sweep(args: argparse.Namespace) -> None:
+    run_time_penalty_sweep(
+        rl_timesteps=args.rl_timesteps,
+        pid_samples=args.pid_samples,
+        pid_episodes=args.pid_episodes,
+        eval_episodes=args.eval_episodes,
+        seed=args.seed,
+        n_jobs=args.jobs,
+    )
+
+
 def cmd_benchmark(args: argparse.Namespace) -> None:
     controllers = {"Heuristic": HeuristicController()}
 
@@ -125,6 +137,20 @@ def main() -> None:
     )
     pid_search_parser.add_argument("--output-dir", default=None)
     pid_search_parser.set_defaults(func=cmd_pid_search)
+
+    time_penalty_parser = subparsers.add_parser(
+        "time-penalty-sweep",
+        help="Sweep a per-step time penalty across both controllers and plot the trade-off",
+    )
+    time_penalty_parser.add_argument("--rl-timesteps", type=int, default=150_000)
+    time_penalty_parser.add_argument("--pid-samples", type=int, default=200)
+    time_penalty_parser.add_argument("--pid-episodes", type=int, default=30)
+    time_penalty_parser.add_argument("--eval-episodes", type=int, default=30)
+    time_penalty_parser.add_argument("--seed", type=int, default=0)
+    time_penalty_parser.add_argument(
+        "--jobs", type=int, default=None, help="Parallel worker processes for pid-search (default: CPU count)"
+    )
+    time_penalty_parser.set_defaults(func=cmd_time_penalty_sweep)
 
     args = parser.parse_args()
     args.func(args)
