@@ -1,0 +1,5 @@
+.venv/
+.claude/
+**/tmp/
+**/__pycache__/
+lunar_lander_lab/models
