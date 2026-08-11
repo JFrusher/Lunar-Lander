@@ -10,11 +10,19 @@ from stable_baselines3.common.vec_env import DummyVecEnv
 from .base import BaseController
 from ..utils.paths import latest_run_file, new_run_dir
 
-# Default PPO hyperparameters for LunarLander. Not claimed optimal — but they
-# survived a 12-config Latin-Hypercube challenge of the surrounding space at
-# 1M timesteps (see `ppo_search.py`), where no sample beat them: best sampled
-# was 248.0 reward / 90% success vs. 277.0 / 100% here. Single seed, so read
-# this as "not yet beaten", not "best".
+# Default PPO hyperparameters for LunarLander. Challenged by a 30-config
+# Latin-Hypercube sweep at 1M timesteps (see `ppo_search.py`); the winner was
+# retrained at 3 seeds and measured on held-out episodes against these:
+#
+#            reward (3 seeds)   success   landing steps
+#   default    261.2 ± 4.8       99.3%        321
+#   swept      261.3 ± 15.8      89.3%        282
+#
+# Indistinguishable on reward; the default is better on success rate and
+# three times more seed-stable, which is why it stays. The swept config is
+# ~12% faster and would be the better pick if landing speed were the
+# objective. Both single-seed figures that earlier looked decisive here
+# (277.0 for the default, 269.4 for the swept config) were lucky draws.
 DEFAULT_HYPERPARAMS = {
     "policy": "MlpPolicy",
     "learning_rate": 3e-4,

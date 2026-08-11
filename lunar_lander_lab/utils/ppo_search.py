@@ -20,7 +20,7 @@ from typing import Dict, List, Optional, Tuple
 import pandas as pd
 
 from .paths import new_run_dir
-from .pid_search import sample_gain_sets
+from .pid_search import HOLDOUT_SEED_START, sample_gain_sets
 
 # `learning_rate` is sampled log-uniformly (as log10) — a linear sweep of
 # 1e-4..1e-3 would spend 90% of its samples above 5e-4.
@@ -90,6 +90,8 @@ def run_ppo_search(
     param_space: Optional[Dict[str, Tuple[float, float]]] = None,
     output_dir: Optional[str] = None,
     n_jobs: Optional[int] = None,
+    holdout_top_k: int = 5,
+    holdout_episodes: int = 100,
 ) -> pd.DataFrame:
     """Latin-Hypercube-sample `param_space`, train/evaluate each, rank by mean_reward."""
     param_space = param_space or PPO_PARAM_SPACE
@@ -116,8 +118,32 @@ def run_ppo_search(
     csv_path = out_dir / "ppo_search_results.csv"
     df.to_csv(csv_path, index=False)
 
+    # Same selection bias pid_search had: ranking N configs on the episodes
+    # used to score them inflates the winner. Re-score the top-k on held-out
+    # episodes — cheap here, since the models are already trained and this is
+    # inference only.
+    from ..controllers.rl_agent import RLAgent
+    from .time_penalty import evaluate_controller_natural
+
+    k = min(holdout_top_k, len(df))
+    print(f"Re-scoring top {k} on {holdout_episodes} held-out episodes...")
+    holdout_rows = []
+    for _, row in df.head(k).iterrows():
+        agent = RLAgent()
+        agent.load(row["detail"])
+        metrics = evaluate_controller_natural(
+            agent, holdout_episodes, seed_start=HOLDOUT_SEED_START
+        )
+        holdout_rows.append({**{n: row[n] for n in to_hyperparams(samples[0])},
+                             "detail": row["detail"],
+                             "search_mean_reward": row["mean_reward"], **metrics})
+
+    holdout_df = pd.DataFrame(holdout_rows).sort_values("mean_reward", ascending=False)
+    holdout_df.to_csv(out_dir / "holdout_top_k.csv", index=False)
+
     param_names = list(to_hyperparams(samples[0]))
-    best_row = df.iloc[0]
+    search_best = df.iloc[0]
+    best_row = holdout_df.iloc[0]
     summary = {
         "best_hyperparams": {name: float(best_row[name]) for name in param_names},
         "mean_reward": float(best_row["mean_reward"]),
@@ -127,6 +153,10 @@ def run_ppo_search(
         "total_timesteps": total_timesteps,
         "n_samples": n_samples,
         "seed": seed,
+        "holdout_top_k": k,
+        "holdout_episodes": holdout_episodes,
+        "search_set_best_mean_reward": float(search_best["mean_reward"]),
+        "search_set_optimism": float(search_best["mean_reward"] - best_row["mean_reward"]),
     }
     with open(out_dir / "best_hyperparams.json", "w") as f:
         json.dump(summary, f, indent=2)
