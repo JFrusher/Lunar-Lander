@@ -16,6 +16,7 @@ from .utils.evaluation import SUCCESS_REWARD_THRESHOLD, run_benchmark
 from .utils.pid_search import CORE_PARAM_SPACE, EXTENDED_PARAM_SPACE, run_monte_carlo
 from .utils.ppo_convergence import run_ppo_convergence_check
 from .utils.ppo_search import DEFAULT_TIMESTEPS, run_ppo_search
+from .utils.speed_ceiling import run_speed_ceiling
 from .utils.time_penalty import run_multi_seed_sweep, run_time_penalty_sweep
 
 DEFAULT_MODEL_NAME = "ppo_lunar_lander"
@@ -121,6 +122,10 @@ def cmd_hparam_search(args: argparse.Namespace) -> None:
     )
 
 
+def cmd_speed_ceiling(args: argparse.Namespace) -> None:
+    run_speed_ceiling(n_samples=args.samples, seed_start=args.seed)
+
+
 def cmd_benchmark(args: argparse.Namespace) -> None:
     controllers = {"Heuristic": HeuristicController()}
 
@@ -223,6 +228,17 @@ def main() -> None:
         "--jobs", type=int, default=None, help="Parallel worker processes (default: CPU count)"
     )
     hparam_parser.set_defaults(func=cmd_hparam_search)
+
+    speed_ceiling_parser = subparsers.add_parser(
+        "speed-ceiling",
+        help="Idealized point-mass minimum-time descent bound (tmp/SPEED_ROADMAP.md Phase 1)",
+    )
+    speed_ceiling_parser.add_argument(
+        "--samples", type=int, default=20,
+        help="Reset samples used to measure engine/gravity constants and the start-state distribution",
+    )
+    speed_ceiling_parser.add_argument("--seed", type=int, default=0)
+    speed_ceiling_parser.set_defaults(func=cmd_speed_ceiling)
 
     args = parser.parse_args()
     args.func(args)
