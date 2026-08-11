@@ -1,9 +1,11 @@
 """PPO-based reinforcement learning controller (Stable-Baselines3)."""
 
 from pathlib import Path
-from typing import Callable, Optional, Sequence
+from typing import Callable, Optional, Sequence, Union
 
 import gymnasium as gym
+import numpy as np
+from gymnasium import spaces
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv
 
@@ -51,12 +53,24 @@ class RLAgent(BaseController):
         save_path: str = "ppo_lunar_lander",
         hyperparams: Optional[dict] = None,
         env_wrapper: Optional[Callable[[gym.Env], gym.Env]] = None,
+        tensorboard_log: Optional[str] = None,
+        env_kwargs: Optional[dict] = None,
     ) -> str:
-        """Train a PPO model from scratch and save the weights to runs/train/<timestamp>/."""
+        """Train a PPO model from scratch and save the weights to runs/train/<timestamp>/.
+
+        Pass `tensorboard_log` (a directory) to record learning curves. Off by
+        default: the sweeps in `utils/` train dozens of models per run and
+        don't all want the extra writes. Worth switching on whenever a *single*
+        run's behaviour over time matters -- every collapse this project has
+        diagnosed so far was read off a final number after the fact, when a
+        curve would have shown it happening.
+        """
         params = {**DEFAULT_HYPERPARAMS, **(hyperparams or {})}
+        if tensorboard_log is not None:
+            params["tensorboard_log"] = tensorboard_log
 
         def make_env():
-            env = gym.make(env_name)
+            env = gym.make(env_name, **(env_kwargs or {}))
             return env_wrapper(env) if env_wrapper else env
 
         env = DummyVecEnv([make_env])
@@ -82,8 +96,18 @@ class RLAgent(BaseController):
             path = latest_run_file("train", f"{model_path}.zip")
         self.model = PPO.load(str(path))
 
-    def get_action(self, observation: Sequence[float]) -> int:
+    def get_action(self, observation: Sequence[float]) -> Union[int, np.ndarray]:
+        """Return an action of whatever type this model's action space uses.
+
+        Discrete gives a plain int (what every controller in this repo has
+        returned until now); a Box action space gives the raw 2-vector. The
+        model's own `action_space` decides, so a continuous checkpoint can be
+        loaded and evaluated through the same code path as a discrete one --
+        `int(action)` would silently truncate the vector to its first element.
+        """
         if self.model is None:
             raise RuntimeError("No model loaded. Call train() or load() first.")
         action, _ = self.model.predict(observation, deterministic=True)
-        return int(action)
+        if isinstance(self.model.action_space, spaces.Discrete):
+            return int(action)
+        return action

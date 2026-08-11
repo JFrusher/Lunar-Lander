@@ -6,10 +6,19 @@ dynamics. See tmp/SPEED_ROADMAP.md, Phase 1.
 """
 
 from dataclasses import dataclass
-from typing import List, Tuple
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
 
 import gymnasium as gym
+import matplotlib.pyplot as plt
+import pandas as pd
 from gymnasium.envs.box2d.lunar_lander import FPS, LEG_DOWN, SCALE
+
+from .paths import new_run_dir
+
+# Chart tokens shared with time_penalty.py so every figure in this repo reads
+# as one system (validated CVD-safe pair -- see that module's note).
+from .time_penalty import _CONTROLLER_COLORS, _GRID, _INK_MUTED, _INK_PRIMARY, _SURFACE
 
 DT = 1.0 / FPS
 
@@ -28,6 +37,11 @@ CURRENT_BEST_STEPS = {
     "RL (PPO), penalty=0.1": 250.5,
     "Heuristic, penalty=0.0": 400.8,
 }
+
+# The ceiling bars get a recessive neutral rather than a third categorical
+# hue: they're the reference the controllers are measured against, not a
+# competing series. Controllers keep their usual identity colors.
+_CEILING_INK = "#b9b7b0"
 
 
 @dataclass
@@ -168,6 +182,70 @@ def min_time_to_land(
     return {"feasible": False, "switch_tick": 0, "ticks": ticks, "touchdown_speed": speed}
 
 
+def ceiling_chart_data(
+    rows: List[dict], measured: Optional[Dict[str, float]] = None
+) -> List[Tuple[str, float, bool]]:
+    """Merge idealized ceiling rows with measured controller results into a
+    single ascending list of `(label, ticks, is_ceiling)`.
+
+    Sorted fastest-first so the chart reads as one continuous scale from
+    "physically possible" up to "what we actually do" -- the gap between
+    those is the whole point of Phase 1.
+    """
+    measured = CURRENT_BEST_STEPS if measured is None else measured
+    entries = [
+        (f"ceiling @ {r['safe_touchdown_speed']:.2f} u/s", r["mean_ticks"], True) for r in rows
+    ]
+    entries += [(label, ticks, False) for label, ticks in measured.items()]
+    return sorted(entries, key=lambda e: e[1])
+
+
+def _plot_ceiling(entries: List[Tuple[str, float, bool]], path: Path) -> None:
+    """Horizontal bars: idealized floors recessive grey, real controllers in
+    their usual identity colors (blue heuristic / orange RL, as everywhere
+    else in this repo). The ceiling isn't an entity competing with them --
+    it's the reference they're measured against, so it stays recessive."""
+    labels = [e[0] for e in entries]
+    values = [e[1] for e in entries]
+    colors = [
+        _CEILING_INK if is_ceiling
+        else (_CONTROLLER_COLORS["Heuristic"] if "Heuristic" in label
+              else _CONTROLLER_COLORS["RL (PPO)"])
+        for label, _, is_ceiling in entries
+    ]
+
+    fig, ax = plt.subplots(figsize=(9, 4.2), facecolor=_SURFACE)
+    ax.set_facecolor(_SURFACE)
+    positions = range(len(entries))
+    ax.barh(list(positions), values, color=colors, height=0.62)
+
+    for pos, value in zip(positions, values):
+        ax.text(value + max(values) * 0.012, pos, f"{value:.0f}",
+                va="center", fontsize=9, color=_INK_PRIMARY)
+
+    ax.set_yticks(list(positions), labels, fontsize=9)
+    ax.invert_yaxis()
+    ax.set_xlabel("ticks to touchdown (lower is faster)", color=_INK_PRIMARY)
+    ax.set_xlim(0, max(values) * 1.12)
+    ax.grid(True, axis="x", color=_GRID, linewidth=0.8)
+    ax.set_axisbelow(True)
+    for spine in ax.spines.values():
+        spine.set_color(_GRID)
+    ax.tick_params(colors=_INK_MUTED)
+
+    ax.set_title(
+        "Idealized minimum-time descent vs. measured controllers",
+        color=_INK_PRIMARY, fontsize=12, pad=12,
+    )
+    fig.text(0.5, -0.04,
+             "Grey = point-mass bang-bang lower bound (no horizontal or rotational dynamics). "
+             "Colored = measured, held-out episodes.",
+             ha="center", fontsize=8, color=_INK_MUTED)
+    fig.tight_layout()
+    fig.savefig(path, dpi=150, facecolor=_SURFACE, bbox_inches="tight")
+    plt.close(fig)
+
+
 def run_speed_ceiling(
     safe_touchdown_speeds: Tuple[float, ...] = (
         SHIPPED_HEURISTIC_TARGET_SPEED,
@@ -176,9 +254,11 @@ def run_speed_ceiling(
     ),
     n_samples: int = 20,
     seed_start: int = 0,
+    output_dir: Optional[str] = None,
 ) -> List[dict]:
     """Print and return the idealized minimum-time ceiling at a few candidate
     safe-touchdown-speed assumptions, alongside the current shipped best.
+    Writes a CSV + chart to `runs/speed_ceiling/<timestamp>/`.
 
     Solved per sampled (h0, v0) start state and averaged over the *results*,
     not solved once on the average start state -- v0 in particular varies in
@@ -221,4 +301,12 @@ def run_speed_ceiling(
                 "infeasible_count": infeasible,
             }
         )
+
+    out_dir = Path(output_dir) if output_dir else new_run_dir("speed_ceiling")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(rows).to_csv(out_dir / "speed_ceiling.csv", index=False)
+    plot_path = out_dir / "speed_ceiling.png"
+    _plot_ceiling(ceiling_chart_data(rows), plot_path)
+    print(f"\nCSV:  {out_dir / 'speed_ceiling.csv'}")
+    print(f"Plot: {plot_path}")
     return rows

@@ -20,7 +20,8 @@ about the lander.
 6. [Grading your own homework](#6-grading-your-own-homework)
 7. [Systematic follow-through](#7-systematic-follow-through)
 8. [Where it landed](#8-where-it-landed)
-9. [Techniques, and what I'd do differently](#9-techniques-and-what-id-do-differently)
+9. [Chasing the ceiling](#9-chasing-the-ceiling)
+10. [Techniques, and what I'd do differently](#10-techniques-and-what-id-do-differently)
 
 ---
 
@@ -240,7 +241,116 @@ designed to buy speed without paying reward. Nothing is being paid. The
 original cost estimate that motivated it — 16% faster for 5.6% reward and
 13 points of success — came from the pre-fix, undertrained sweep.
 
-## 9. Techniques, and what I'd do differently
+## 9. Chasing the ceiling
+
+The penalty study answered "does this make it faster." It never answered
+"faster compared to what." A 22% improvement is only impressive if you know
+how much was available.
+
+### How fast *can* it land?
+
+Model the lander as a point mass under gravity with bounded thrust and solve
+the minimum-time descent: free-fall, then brake. The constants come off a
+live environment rather than a guess — mass 4.817, gravity −10.0, and a main
+engine that nets **+0.158 velocity units per tick over gravity** while
+firing.
+
+That last number reframes the problem. The engine is barely stronger than
+the fall. Any design that assumes the lander can shed speed at the last
+moment is assuming authority it doesn't have.
+
+![speed ceiling](docs/media/speed_ceiling.png)
+
+At the shipped controller's own target descent speed, the floor is ~154
+ticks against a measured 250 (PPO) and 401 (heuristic). Real headroom —
+roughly 40% still on the table for PPO.
+
+**The model was wrong twice, and said so itself.** The first version
+returned a "lower bound" *slower* than the real controllers, which is
+impossible by construction. Two causes: braking continuously from the switch
+point overshoots into sustained ascent, because the engine outpaces gravity
+— so the brake phase has to be self-limiting. And it solved on the *mean*
+start state, but the environment's random initial push ranges −3.96 to
++3.82, so the mean is a state no episode ever has. Fixed by solving
+per-sample and averaging results, not inputs.
+
+I did not catch either by reading the code. I caught them because the answer
+was impossible, which is the same reflex as §3 — the number was wrong in a
+way that was *visible*, so it got treated as a bug report.
+
+### Denying the engine on purpose
+
+If hovering is the problem, forbid the fix. Block the main engine for the
+first N steps and force an efficient fall. Two gate forms: a fixed step
+count, or an altitude threshold.
+
+![lockout sweep](docs/media/lockout_step_sweep.png)
+
+Altitude gating fails outright on both controllers — 0% success for PPO at
+every threshold tested. A step gate has a fixed, learnable duration; an
+altitude gate's duration depends on how each episode's random push unfolds,
+which makes it a moving target.
+
+Step gating works, and **both controllers independently put their optimum at
+15 steps**:
+
+| controller | baseline steps | step<15 | change | success |
+|---|---|---|---|---|
+| Heuristic | 397.4 | 367.3 | −7.6% | 98.0% → **100.0%** |
+| RL (PPO) | 321.2 ± 24.1 | 264.6 ± 18.2 | −17.6% (3/3 seeds) | 99.3% → 97.0% |
+
+For the heuristic it's strictly free — better reward, success *and* speed at
+once. For PPO it's a real trade: 17.6% speed for 2.3 points of success.
+
+**This inverts §8's asymmetry.** The time penalty worked on PPO and did
+nothing for the heuristic. Lockout works on the heuristic and is the weaker,
+costlier result on PPO. The mechanism explains why: a penalty shapes what a
+policy *learns*, so it needs a learner. A lockout constrains what any
+controller *may do*, so it applies to a fixed controller directly — and the
+heuristic's untuned reaction to being denied its engine happens to be a
+better trajectory than the one it chooses freely.
+
+### The fifth lucky draw
+
+The first pass swept `[20, 50, 100]`. 20 won, 50 broke, and I wrote down
+that 20 was the optimum. Both halves of that were wrong.
+
+There is no cliff between 20 and 50 — there's a ramp (100% → 97% → 67% →
+48% → 21%), invisible because nothing was sampled in it. And 20 wasn't the
+optimum; 15 was. "Best of the one viable value I happened to try" is not the
+same claim as "best", and I'd written the second.
+
+Then the finer grid produced a fresh trap. On seed 0, step<10 looked like a
+second strong contender at 250 steps. Across three seeds it is *worse than
+baseline* (+25.9 steps) with a standard deviation of **105.6** — one seed
+produced a 459-step policy. A shorter lockout isn't a gentler version of a
+longer one; it's less stable.
+
+That is the fifth single-seed result in this project to evaporate on
+repeat, after 277.0, 269.4, 250.53, and step<20's own first pass. The
+lesson from §9 of the original write-up was "error bars before conclusions."
+I had written that lesson down and then, one phase later, reported a
+single-seed grid winner anyway.
+
+### What makes step<15 believable
+
+3/3 seeds is better than step<20's 2/3, but at n=3 with std 39.5 it still
+isn't significant alone (sign test p≈0.125). What raises confidence is that
+it isn't alone: the heuristic leg has **no training seed** — a deterministic
+controller on a fixed episode set — and it landed on 15 independently. Two
+measurements with unrelated error sources agreeing on the same value is
+worth more than either.
+
+### One more caveat, on a column that lies
+
+`avg_landing_steps` averages over *successful* episodes only. At step<40 the
+heuristic lands 48 times in 100; at step<50, 21 times. Those configs look
+fast because the episodes that survived are the ones that went well. The
+apparent speedup past step<20 is substantially selection effect, not speed —
+which is why those points are drawn hollow above and excluded from the
+trend line rather than quietly plotted alongside honest ones.
+
+## 10. Techniques, and what I'd do differently
 
 **Reinforcement learning** — PPO (Stable-Baselines3), reward shaping via
 environment wrappers, convergence validation before interpretation,
@@ -265,8 +375,16 @@ GitHub Actions CI, timestamped run artifacts.
   episodes should have been separate from the first commit.
 - **Error bars before conclusions, not after.** Every single-point estimate
   in this project that looked decisive turned out to be a lucky draw —
-  277.0, 269.4, 250.53. The pattern was consistent enough that I should
-  have stopped trusting single seeds much earlier than I did.
+  277.0, 269.4, 250.53, then step<20 and step<10 in §9. Five times. I wrote
+  this lesson down after the third and reported a single-seed grid winner
+  one phase later anyway, which suggests knowing the rule and having the
+  reflex are different things. The durable fix is procedural, not
+  attitudinal: a sweep should not be *able* to report a winner without a
+  repeat.
+- **Sample the region where the answer lives.** The lockout grid jumped
+  20 → 50 and I read the gap as a cliff. It's a ramp, and the real optimum
+  sat in the unsampled interval. A grid whose adjacent points disagree that
+  violently is telling you it's too coarse.
 - **Validate inherited constants.** The 150,000-timestep budget was never
   chosen; it was assumed. It was wrong by a factor of ~7 and silently
   invalidated everything downstream.
@@ -274,7 +392,11 @@ GitHub Actions CI, timestamped run artifacts.
 ### Limitations
 
 - 3 seeds per configuration. Enough to catch the errors above; not enough
-  for a confident effect size. 5–10 would be better.
+  for a confident effect size. 5–10 would be better. §9's headline
+  (step<15, −17.6%) is 3/3 same-sign but not significant on its own.
+- The speed ceiling in §9 is a 1-D point mass. It ignores horizontal and
+  rotational dynamics entirely, so it is a genuine lower bound but a loose
+  one — the gap it shows is an upper estimate of the headroom, not a target.
 - The penalty sweep's sweet spot (0.1) is identified on a 6-point grid. The
   true optimum is somewhere in 0.05–0.2 and this study doesn't resolve it.
 - PPO was still improving at 1M timesteps. The convergence check found the

@@ -2,7 +2,7 @@
 
 import pytest
 
-from lunar_lander_lab.controllers.rl_agent import RLAgent
+from lunar_lander_lab.controllers.rl_agent import DEFAULT_HYPERPARAMS, RLAgent
 
 
 @pytest.fixture
@@ -62,3 +62,35 @@ def test_unknown_name_raises_file_not_found(runs_dir, fake_ppo_load):
 def test_get_action_without_a_model_is_a_clear_error():
     with pytest.raises(RuntimeError, match="No model loaded"):
         RLAgent().get_action([0.0] * 8)
+
+
+def test_tensorboard_log_is_off_unless_asked_for():
+    """Sweeps train dozens of models per run and shouldn't all write curves,
+    so the default must stay clean -- and must not leak into the shared
+    DEFAULT_HYPERPARAMS dict, which every other caller reads."""
+    assert "tensorboard_log" not in DEFAULT_HYPERPARAMS
+
+
+def test_tensorboard_log_reaches_ppo_when_requested(tmp_path, monkeypatch):
+    captured = {}
+
+    class _StubPPO:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        def learn(self, **_):
+            pass
+
+        def save(self, _path):
+            pass
+
+    monkeypatch.setattr("lunar_lander_lab.controllers.rl_agent.PPO", _StubPPO)
+    monkeypatch.setattr(
+        "lunar_lander_lab.controllers.rl_agent.new_run_dir", lambda _kind: tmp_path
+    )
+
+    RLAgent().train(total_timesteps=1, tensorboard_log=str(tmp_path / "tb"))
+
+    assert captured["tensorboard_log"] == str(tmp_path / "tb")
+    # The shared default dict must be untouched by that call.
+    assert "tensorboard_log" not in DEFAULT_HYPERPARAMS

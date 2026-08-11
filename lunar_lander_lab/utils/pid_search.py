@@ -75,6 +75,26 @@ def sample_gain_sets(
 HOLDOUT_SEED_START = 10_000
 
 
+def select_fastest_within_floor(
+    df: pd.DataFrame, success_floor: float, top_k: int = 10
+) -> pd.DataFrame:
+    """Rank gain sets by landing speed subject to a success-rate floor.
+
+    A different objective from `run_monte_carlo`'s penalized argmax, which
+    maximizes `mean_reward - penalty * avg_steps`. That blend lets a gain set
+    trade success away for speed at whatever exchange rate the penalty
+    implies; this states the constraint directly instead -- be at least this
+    reliable, then be as fast as possible.
+
+    Rows that never landed (`avg_steps_success` is NaN) are dropped rather
+    than sorted, or they would rank as infinitely fast.
+    """
+    eligible = df[
+        (df["success_rate_pct"] >= success_floor) & df["avg_steps_success"].notna()
+    ]
+    return eligible.nsmallest(top_k, "avg_steps_success")
+
+
 def _evaluate_gain_set(args: Tuple[Dict[str, float], int, str, int]) -> Dict[str, float]:
     """Run one gain set for `episodes` seeded episodes. Runs in a worker process."""
     gains, episodes, env_name, seed_start = args

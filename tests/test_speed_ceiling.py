@@ -6,11 +6,28 @@ import pytest
 
 from lunar_lander_lab.utils.speed_ceiling import (
     DescentConstants,
+    ceiling_chart_data,
     measure_descent_constants,
     min_time_to_land,
     sample_initial_states,
     simulate_descent,
 )
+
+
+def test_ceiling_chart_data_sorts_ascending_and_tags_ceilings():
+    """The chart's whole point is the gap between the physical floor and the
+    measured controllers, so it must read as one ascending scale with the two
+    kinds distinguishable."""
+    rows = [
+        {"safe_touchdown_speed": 0.3, "mean_ticks": 241.6},
+        {"safe_touchdown_speed": 1.0, "mean_ticks": 121.4},
+    ]
+    measured = {"RL (PPO), penalty=0.1": 250.5, "Heuristic, penalty=0.0": 400.8}
+
+    entries = ceiling_chart_data(rows, measured)
+
+    assert [round(v) for _, v, _ in entries] == [121, 242, 250, 401]
+    assert [is_ceiling for _, _, is_ceiling in entries] == [True, True, False, False]
 
 
 def test_simulate_descent_matches_closed_form_free_fall():

@@ -31,10 +31,7 @@ episodes.
 | Heuristic | 0.4 | 248.5 ± 2.9 | 97.0% | 388 |
 
 Each row is the mean over 3 independent runs at that penalty level — for
-the heuristic, 3 fresh gain searches; for PPO, 3 training runs. The gains
-actually shipped in `configs/heuristic_gains.json` score **249.5 reward /
-98.0% success / 397 steps** on the same held-out episodes, within a
-standard deviation of the penalty-0.0 row above.
+the heuristic, 3 fresh gain searches; for PPO, 3 training runs.
 
 The penalty shapes what PPO *learns*, but for the heuristic it only
 re-ranks a fixed pool of already-sampled gain sets — so it applies no
@@ -43,8 +40,33 @@ search pressure and cannot produce a faster controller.
 **PPO needs ~400k timesteps to land at all**, and 1M to do it well; below
 that it fails outright rather than merely underperforming.
 
-📖 **[Read the full investigation →](INVESTIGATION.md)** — four methodology
-bugs, three of them caught by treating a suspiciously clean number as a bug
+### Making the heuristic faster
+
+Two mechanisms the penalty sweep never tried, measured on 200 held-out
+episodes the search never saw:
+
+| heuristic config | steps | success | reward | fuel |
+|---|---|---|---|---|
+| previous shipped gains | 396.3 | 100.0% | 251.3 | 11305 |
+| previous gains + 15-step engine lockout | 370.7 | 98.5% | 253.3 | 10692 |
+| **current shipped gains** | **374.7** | **99.5%** | **255.6** | **10507** |
+| current gains + 15-step engine lockout | 351.6 | 97.5% | 254.0 | 9846 |
+
+![lockout sweep](docs/media/lockout_step_sweep.png)
+
+Blocking the main engine for the first 15 steps forces an efficient
+free-fall instead of an early hover, and it stacks with re-picking the gains
+for speed rather than reward — **−11.3% together**, on 12.9% *less* fuel.
+Longer lockouts collapse both controllers; the transition is a ramp, not a
+cliff, and finding that needed a grid fine enough to see it.
+
+How much is left? A point-mass minimum-time descent puts the floor well
+below what either controller achieves:
+
+![speed ceiling](docs/media/speed_ceiling.png)
+
+📖 **[Read the full investigation →](INVESTIGATION.md)** — six methodology
+bugs, most of them caught by treating a suspiciously clean number as a bug
 report against my own analysis.
 
 ## Project Structure
@@ -202,6 +224,22 @@ Trains/tunes both controllers at each penalty level and plots the landing
 speed / reward trade-off. `multi-seed-sweep` repeats across seeds and
 aggregates mean ± std — the chart in [Results](#results). Both evaluate on
 natural (unpenalized) reward, so the penalty never scores its own effect.
+
+### View training curves
+
+`RLAgent.train()` takes an optional `tensorboard_log` directory:
+
+```python
+RLAgent().train(total_timesteps=1_000_000, tensorboard_log="runs/tensorboard/my_run")
+```
+
+```bash
+tensorboard --logdir runs/tensorboard    # needs the dev extra
+```
+
+Off by default — the sweeps train dozens of models per run and don't all
+want the extra writes. Worth switching on when a single run's behaviour
+*over time* matters rather than its final score.
 
 ### Record a demo GIF
 

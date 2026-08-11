@@ -12,12 +12,15 @@ from typing import Optional
 import gymnasium as gym
 
 from .controllers import HeuristicController, RLAgent
+from .utils.continuous_compare import ARMS, COMPARISON_PENALTY, run_continuous_comparison
 from .utils.evaluation import SUCCESS_REWARD_THRESHOLD, run_benchmark
+from .utils.lockout_sweep import run_lockout_sweep
+from .utils.penalty_curriculum import SCHEDULES, TARGET_PENALTY, run_penalty_curriculum_sweep
 from .utils.pid_search import CORE_PARAM_SPACE, EXTENDED_PARAM_SPACE, run_monte_carlo
 from .utils.ppo_convergence import run_ppo_convergence_check
 from .utils.ppo_search import DEFAULT_TIMESTEPS, run_ppo_search
 from .utils.speed_ceiling import run_speed_ceiling
-from .utils.time_penalty import run_multi_seed_sweep, run_time_penalty_sweep
+from .utils.time_penalty import EngineLockoutWrapper, run_multi_seed_sweep, run_time_penalty_sweep
 
 DEFAULT_MODEL_NAME = "ppo_lunar_lander"
 
@@ -35,6 +38,10 @@ def build_controller(name: str, model_name: Optional[str] = None):
 def cmd_run(args: argparse.Namespace) -> None:
     controller = build_controller(args.controller, model_name=args.model)
     env = gym.make("LunarLander-v3", render_mode="human")
+    if args.lockout_steps is not None or args.lockout_altitude is not None:
+        env = EngineLockoutWrapper(
+            env, lockout_steps=args.lockout_steps, altitude_threshold=args.lockout_altitude
+        )
 
     episode = 0
     rewards = []
@@ -126,6 +133,37 @@ def cmd_speed_ceiling(args: argparse.Namespace) -> None:
     run_speed_ceiling(n_samples=args.samples, seed_start=args.seed)
 
 
+def cmd_lockout_sweep(args: argparse.Namespace) -> None:
+    run_lockout_sweep(
+        total_timesteps=args.rl_timesteps,
+        eval_episodes=args.eval_episodes,
+        seeds=args.seeds,
+        n_jobs=args.jobs,
+    )
+
+
+def cmd_penalty_curriculum_sweep(args: argparse.Namespace) -> None:
+    run_penalty_curriculum_sweep(
+        shapes=args.shapes,
+        seeds=args.seeds,
+        total_timesteps=args.rl_timesteps,
+        eval_episodes=args.eval_episodes,
+        target=args.target,
+        n_jobs=args.jobs,
+    )
+
+
+def cmd_continuous_compare(args: argparse.Namespace) -> None:
+    run_continuous_comparison(
+        arms=args.arms,
+        seeds=args.seeds,
+        total_timesteps=args.rl_timesteps,
+        eval_episodes=args.eval_episodes,
+        penalty=args.penalty,
+        n_jobs=args.jobs,
+    )
+
+
 def cmd_benchmark(args: argparse.Namespace) -> None:
     controllers = {"Heuristic": HeuristicController()}
 
@@ -152,6 +190,14 @@ def main() -> None:
     )
     run_parser.add_argument(
         "--model", default=None, help="Checkpoint name in models/ for --controller rl (default: ppo_lunar_lander)"
+    )
+    run_parser.add_argument(
+        "--lockout-steps", type=int, default=None,
+        help="Block the main engine for the first N steps (tmp/SPEED_ROADMAP.md Phase 2)",
+    )
+    run_parser.add_argument(
+        "--lockout-altitude", type=float, default=None,
+        help="Block the main engine while normalized altitude is above this",
     )
     run_parser.set_defaults(func=cmd_run)
 
@@ -239,6 +285,58 @@ def main() -> None:
     )
     speed_ceiling_parser.add_argument("--seed", type=int, default=0)
     speed_ceiling_parser.set_defaults(func=cmd_speed_ceiling)
+
+    lockout_parser = subparsers.add_parser(
+        "lockout-sweep",
+        help="Sweep engine-lockout gating (step-based and altitude-based) across both controllers "
+        "(tmp/SPEED_ROADMAP.md Phase 2)",
+    )
+    lockout_parser.add_argument("--rl-timesteps", type=int, default=1_000_000)
+    lockout_parser.add_argument("--eval-episodes", type=int, default=100)
+    lockout_parser.add_argument(
+        "--seeds", type=int, nargs="+", default=[0],
+        help="RL seeds -- default is a single-seed first pass; pass 3 to confirm a winner",
+    )
+    lockout_parser.add_argument(
+        "--jobs", type=int, default=None, help="Parallel worker processes (default: CPU count)"
+    )
+    lockout_parser.set_defaults(func=cmd_lockout_sweep)
+
+    curriculum_parser = subparsers.add_parser(
+        "penalty-curriculum-sweep",
+        help="Anneal the time penalty over training instead of fixing it "
+        "(tmp/SPEED_ROADMAP.md Phase 5)",
+    )
+    curriculum_parser.add_argument(
+        "--shapes", nargs="+", choices=sorted(SCHEDULES), default=sorted(SCHEDULES)
+    )
+    curriculum_parser.add_argument("--seeds", type=int, nargs="+", default=[0])
+    curriculum_parser.add_argument("--rl-timesteps", type=int, default=1_000_000)
+    curriculum_parser.add_argument("--eval-episodes", type=int, default=100)
+    curriculum_parser.add_argument(
+        "--target", type=float, default=TARGET_PENALTY,
+        help="Penalty the schedule ramps up to (default: the level a flat penalty collapses at)",
+    )
+    curriculum_parser.add_argument("--jobs", type=int, default=None)
+    curriculum_parser.set_defaults(func=cmd_penalty_curriculum_sweep)
+
+    continuous_parser = subparsers.add_parser(
+        "continuous-compare",
+        help="Discrete vs continuous action space at matched algorithm/budget/seeds "
+        "(tmp/SPEED_ROADMAP.md Phase 8b)",
+    )
+    continuous_parser.add_argument(
+        "--arms", nargs="+", choices=sorted(ARMS), default=sorted(ARMS)
+    )
+    continuous_parser.add_argument("--seeds", type=int, nargs="+", default=[0, 100, 200])
+    continuous_parser.add_argument("--rl-timesteps", type=int, default=1_000_000)
+    continuous_parser.add_argument("--eval-episodes", type=int, default=100)
+    continuous_parser.add_argument(
+        "--penalty", type=float, default=COMPARISON_PENALTY,
+        help="Time penalty both arms train under (default: the best flat level measured)",
+    )
+    continuous_parser.add_argument("--jobs", type=int, default=None)
+    continuous_parser.set_defaults(func=cmd_continuous_compare)
 
     args = parser.parse_args()
     args.func(args)

@@ -19,6 +19,9 @@ dev = [
     "pytest>=8.0",
     "ruff>=0.6",
     "imageio>=2.34",
+    # Only needed to view training curves (RLAgent.train(tensorboard_log=...)).
+    # SB3 imports it lazily, so the core install stays lean.
+    "tensorboard>=2.16",
 ]
 
 [project.scripts]
