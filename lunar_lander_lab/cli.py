@@ -130,7 +130,7 @@ def cmd_benchmark(args: argparse.Namespace) -> None:
         controllers["RL (PPO)"] = rl_agent
     except FileNotFoundError:
         print(f"No trained model found ({DEFAULT_MODEL_NAME}); skipping RL controller. "
-              f"Run 'python main.py train' first.")
+              f"Run 'lunar-lander train' first.")
 
     run_benchmark(controllers, num_episodes=args.episodes)
 

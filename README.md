@@ -30,6 +30,12 @@ episodes.
 | Heuristic | 0.0 | 246.8 ± 2.4 | 97.3% | 401 |
 | Heuristic | 0.4 | 248.5 ± 2.9 | 97.0% | 388 |
 
+Each row is the mean over 3 independent runs at that penalty level — for
+the heuristic, 3 fresh gain searches; for PPO, 3 training runs. The gains
+actually shipped in `configs/heuristic_gains.json` score **249.5 reward /
+98.0% success / 397 steps** on the same held-out episodes, within a
+standard deviation of the penalty-0.0 row above.
+
 The penalty shapes what PPO *learns*, but for the heuristic it only
 re-ranks a fixed pool of already-sampled gain sets — so it applies no
 search pressure and cannot produce a faster controller.

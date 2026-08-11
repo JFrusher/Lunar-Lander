@@ -41,6 +41,9 @@ tolerates it.
 | Heuristic | 246.8 | 97.3% | 401 |
 | PPO | 261.2 | 99.3% | 321 |
 
+*Mean of 3 runs each, evaluated on held-out episodes — by the standards
+established later in this document, not the ones I started with.*
+
 The obvious lever: charge for time.
 
 ## 2. Hypothesis: a flat time penalty
