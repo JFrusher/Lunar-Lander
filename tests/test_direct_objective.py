@@ -1,11 +1,36 @@
 """Phase 4 of tmp/SPEED_ROADMAP.md: rank gain sets by speed subject to a
 success floor, instead of by a reward-minus-penalty blend."""
 
+import json
+
 import numpy as np
 import pandas as pd
 import pytest
 
+from lunar_lander_lab.cli import build_controller
 from lunar_lander_lab.utils.pid_search import select_fastest_within_floor
+
+
+def test_build_controller_applies_an_override_gains_file(tmp_path):
+    """Lets an older gain set be flown next to the current one, which is the
+    only way to actually see what Phase 4's promotion changed."""
+    path = tmp_path / "old.json"
+    path.write_text(json.dumps({"DESCENT_GAIN": 1.9, "ANGLE_GAIN_VEL": 0.25}))
+
+    controller = build_controller("heuristic", gains_path=str(path))
+
+    assert controller.DESCENT_GAIN == 1.9
+    assert controller.ANGLE_GAIN_VEL == 0.25
+
+
+def test_build_controller_rejects_an_unknown_gain(tmp_path):
+    """setattr accepts any name silently, so a typo would produce a controller
+    that ignores the value and looks like it worked."""
+    path = tmp_path / "typo.json"
+    path.write_text(json.dumps({"DESENT_GAIN": 1.9}))
+
+    with pytest.raises(ValueError, match="unknown gain"):
+        build_controller("heuristic", gains_path=str(path))
 
 
 def _frame(rows):

@@ -7,6 +7,8 @@ Usage:
 """
 
 import argparse
+import json
+from pathlib import Path
 from typing import Optional
 
 import gymnasium as gym
@@ -25,9 +27,20 @@ from .utils.time_penalty import EngineLockoutWrapper, run_multi_seed_sweep, run_
 DEFAULT_MODEL_NAME = "ppo_lunar_lander"
 
 
-def build_controller(name: str, model_name: Optional[str] = None):
+def build_controller(
+    name: str, model_name: Optional[str] = None, gains_path: Optional[str] = None
+):
     if name == "heuristic":
-        return HeuristicController()
+        controller = HeuristicController()
+        if gains_path:
+            # Override the shipped gains so an older set can be flown
+            # side-by-side with the current one. Same setattr mechanism
+            # pid_search uses to evaluate a sampled gain set.
+            for gain, value in json.loads(Path(gains_path).read_text()).items():
+                if not hasattr(controller, gain):
+                    raise ValueError(f"{gains_path}: unknown gain {gain!r}")
+                setattr(controller, gain, value)
+        return controller
     if name == "rl":
         agent = RLAgent()
         agent.load(model_name or DEFAULT_MODEL_NAME)
@@ -36,7 +49,9 @@ def build_controller(name: str, model_name: Optional[str] = None):
 
 
 def cmd_run(args: argparse.Namespace) -> None:
-    controller = build_controller(args.controller, model_name=args.model)
+    controller = build_controller(
+        args.controller, model_name=args.model, gains_path=args.gains
+    )
     env = gym.make("LunarLander-v3", render_mode="human")
     if args.lockout_steps is not None or args.lockout_altitude is not None:
         env = EngineLockoutWrapper(
@@ -44,25 +59,53 @@ def cmd_run(args: argparse.Namespace) -> None:
         )
 
     episode = 0
-    rewards = []
+    rewards: list[float] = []
+    landed_flight: list[int] = []
+    landed_settle: list[int] = []
     try:
         while True:
             episode += 1
             observation, _ = env.reset(seed=args.seed)
             total_reward = 0.0
+            steps = 0
+            first_contact = None
             terminated = truncated = False
 
             while not (terminated or truncated):
+                had_contact = bool(observation[6] or observation[7])
                 action = controller.get_action(observation)
                 observation, reward, terminated, truncated, _ = env.step(action)
                 total_reward += float(reward)
+                steps += 1
+                if first_contact is None and not had_contact and (observation[6] or observation[7]):
+                    first_contact = steps
 
             rewards.append(total_reward)
-            successes = sum(r >= SUCCESS_REWARD_THRESHOLD for r in rewards)
-            print(
-                f"Episode {episode}: reward {total_reward:.1f}  "
-                f"(avg {sum(rewards) / len(rewards):.1f}, landed {successes}/{episode})"
+            landed = total_reward >= SUCCESS_REWARD_THRESHOLD
+            # Speed is the whole point of this controller work, so the loop
+            # view reports it -- split at first leg contact, because
+            # everything after that is Box2D settling the lander to sleep and
+            # no controller can fly its way out of it (SPEED_ROADMAP Phase 6).
+            if landed and first_contact is not None:
+                landed_flight.append(first_contact)
+                landed_settle.append(steps - first_contact)
+
+            successes = len(landed_flight)
+            line = (
+                f"Episode {episode}: {'LANDED' if landed else 'failed'}  "
+                f"reward {total_reward:.1f}  steps {steps}"
             )
+            if first_contact is not None:
+                line += f" ({first_contact} flight + {steps - first_contact} settling)"
+            print(line)
+            if successes:
+                print(
+                    f"    running: {successes}/{episode} landed, "
+                    f"avg {sum(landed_flight) / successes:.0f} flight "
+                    f"+ {sum(landed_settle) / successes:.0f} settling "
+                    f"= {(sum(landed_flight) + sum(landed_settle)) / successes:.0f} steps, "
+                    f"avg reward {sum(rewards) / len(rewards):.1f}"
+                )
 
             if not args.loop:
                 break
@@ -198,6 +241,11 @@ def main() -> None:
     run_parser.add_argument(
         "--lockout-altitude", type=float, default=None,
         help="Block the main engine while normalized altitude is above this",
+    )
+    run_parser.add_argument(
+        "--gains", default=None,
+        help="JSON gains file overriding configs/heuristic_gains.json, for flying an "
+             "older gain set side-by-side with the current one",
     )
     run_parser.set_defaults(func=cmd_run)
 
