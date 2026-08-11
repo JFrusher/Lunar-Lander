@@ -1,5 +1,8 @@
 # Lunar Lander Lab
 
+[![CI](https://github.com/JFrusher/Lunar-Lander/actions/workflows/ci.yml/badge.svg)](https://github.com/JFrusher/Lunar-Lander/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 A Python workspace for experimenting with classical (rule-based) control and
 reinforcement learning on Gymnasium's `LunarLander-v3`.
 
@@ -8,10 +11,16 @@ reinforcement learning on Gymnasium's `LunarLander-v3`.
 ```
 Lunar/
 ├── README.md
+├── LICENSE
 ├── pyproject.toml
+├── .github/workflows/ci.yml   # lint + fast/slow test jobs
+├── tests/                     # pytest suite (see Testing below)
 ├── runs/                      # gitignored — all run output, kept forever
 │   ├── train/<timestamp>/     # PPO checkpoints (.zip)
 │   ├── pid_search/<timestamp>/ # gain-sweep datasets + plots
+│   ├── ppo_convergence/<timestamp>/ # timestep-budget convergence curves
+│   ├── ppo_search/<timestamp>/ # PPO hyperparameter sweep datasets
+│   ├── multi_seed_sweep/<timestamp>/ # multi-seed sweeps + error-bar charts
 │   └── benchmark/<timestamp>/ # comparison charts
 └── lunar_lander_lab/
     ├── cli.py                 # CLI entry point
@@ -24,7 +33,10 @@ Lunar/
     └── utils/
         ├── paths.py             # runs/ directory helpers
         ├── evaluation.py        # run_benchmark(): head-to-head controller comparison
-        └── pid_search.py        # Monte Carlo gain sweep
+        ├── pid_search.py        # Monte Carlo gain sweep
+        ├── ppo_convergence.py   # how many timesteps PPO actually needs
+        ├── ppo_search.py        # Monte Carlo PPO hyperparameter sweep
+        └── time_penalty.py      # time-penalty reward shaping + multi-seed sweeps
 ```
 
 ## Setup
@@ -38,6 +50,24 @@ pip install -e .
 
 Requires Python 3.10-3.12 (Box2D and PyTorch wheels; newer interpreters may
 lack prebuilt wheels for these packages).
+
+For the test and lint toolchain, install the `dev` extra instead:
+
+```bash
+pip install -e ".[dev]"
+```
+
+## Testing
+
+```bash
+pytest              # fast suite (~5s) — pure logic, no environments
+pytest -m slow      # real Gymnasium episodes
+pytest -m ""        # everything
+ruff check .        # lint
+```
+
+Tests that step a real environment or train a real model are marked `slow`
+and excluded by default, so the common case stays fast. CI runs both sets.
 
 ## CLI Usage
 

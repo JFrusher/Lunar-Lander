@@ -7,8 +7,8 @@ import gymnasium as gym
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv
 
-from .base import BaseController
 from ..utils.paths import latest_run_file, new_run_dir
+from .base import BaseController
 
 # Default PPO hyperparameters for LunarLander. Challenged by a 30-config
 # Latin-Hypercube sweep at 1M timesteps (see `ppo_search.py`); the winner was

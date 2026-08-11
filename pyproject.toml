@@ -12,8 +12,37 @@ dependencies = [
     "pandas>=2.2.0",
 ]
 
+[project.optional-dependencies]
+# Kept out of the core install so anyone who just wants to fly the lander
+# doesn't pull a test/lint toolchain. imageio is for scripts/record_demo.py.
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+    "imageio>=2.34",
+]
+
 [project.scripts]
 lunar-lander = "lunar_lander_lab.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Slow tests (real Gymnasium episodes, real PPO training) are excluded by
+# default so the common case stays fast. Run them with `pytest -m slow`, or
+# the whole suite with `pytest -m ""`.
+addopts = "-m 'not slow'"
+markers = [
+    "slow: touches a real environment or trains a real model",
+]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+# Pinned explicitly rather than relying on ruff's defaults, which have widened
+# between releases — an unpinned set means a ruff update can fail CI with no
+# code change. Pyflakes (real bugs: undefined names, unused imports) plus
+# essential pycodestyle and import sorting.
+select = ["E4", "E7", "E9", "F", "I"]
 
 [build-system]
 requires = ["setuptools>=68"]

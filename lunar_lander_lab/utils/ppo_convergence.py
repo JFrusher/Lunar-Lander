@@ -119,15 +119,3 @@ def run_ppo_convergence_check(
     print(f"Recommended total_timesteps: {recommended}")
     print(df_results.to_string(index=False))
     return df_results
-
-
-if __name__ == "__main__":
-    df = pd.DataFrame(
-        {
-            "total_timesteps": [100_000, 200_000, 400_000],
-            "mean_reward": [150.0, 240.0, 245.0],
-            "success_rate_pct": [40.0, 95.0, 97.0],
-        }
-    )
-    assert recommend_timesteps(df) == 200_000, recommend_timesteps(df)
-    print("ppo_convergence self-check OK")

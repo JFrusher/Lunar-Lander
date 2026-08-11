@@ -165,13 +165,3 @@ def run_ppo_search(
     print("Best hyperparameter set found:")
     print(json.dumps(summary, indent=2))
     return df
-
-
-if __name__ == "__main__":
-    samples = sample_gain_sets(20, PPO_PARAM_SPACE, seed=0)
-    for sample in samples:
-        hp = to_hyperparams(sample)
-        assert 1e-4 <= hp["learning_rate"] <= 1e-3, hp
-        assert hp["n_steps"] % _BATCH_SIZE == 0, hp
-        assert 0.99 <= hp["gamma"] <= 0.9999, hp
-    print("ppo_search self-check OK")

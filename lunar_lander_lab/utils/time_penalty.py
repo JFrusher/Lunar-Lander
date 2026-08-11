@@ -358,23 +358,3 @@ def run_multi_seed_sweep(
     print(f"Plot:       {plot_path}")
     print(agg.to_string(index=False))
     return agg
-
-
-if __name__ == "__main__":
-    from ..controllers.heuristic import HeuristicController
-
-    env_a = gym.make("LunarLander-v3")
-    env_b = TimePenaltyWrapper(gym.make("LunarLander-v3"), penalty_per_step=0.05)
-    env_a.reset(seed=0)
-    env_b.reset(seed=0)
-    _, reward_a, *_ = env_a.step(0)
-    _, reward_b, *_ = env_b.step(0)
-    env_a.close()
-    env_b.close()
-    assert abs((reward_a - 0.05) - reward_b) < 1e-9, (reward_a, reward_b)
-
-    metrics = evaluate_controller_natural(HeuristicController(), num_episodes=3)
-    assert set(metrics) == {"mean_reward", "success_rate_pct", "crash_rate_pct", "avg_landing_steps"}
-    assert not math.isnan(metrics["avg_landing_steps"]), "heuristic should land at least once in 3 tries"
-
-    print("time_penalty self-check OK:", metrics)

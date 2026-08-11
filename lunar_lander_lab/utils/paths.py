@@ -21,28 +21,3 @@ def latest_run_file(kind: str, filename: str, base: Path = RUNS_DIR) -> Path:
     if not matches:
         raise FileNotFoundError(f"No {filename} found under {base / kind}")
     return matches[-1]
-
-
-if __name__ == "__main__":
-    import shutil
-    import tempfile
-
-    tmp = Path(tempfile.mkdtemp())
-    try:
-        run_dir = new_run_dir("demo", base=tmp)
-        assert run_dir.is_dir(), run_dir
-        (run_dir / "result.txt").write_text("hello")
-
-        found = latest_run_file("demo", "result.txt", base=tmp)
-        assert found == run_dir / "result.txt", found
-        assert found.read_text() == "hello"
-
-        try:
-            latest_run_file("missing", "x.txt", base=tmp)
-            raise AssertionError("expected FileNotFoundError")
-        except FileNotFoundError:
-            pass
-
-        print("paths self-check OK")
-    finally:
-        shutil.rmtree(tmp)

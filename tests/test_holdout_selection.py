@@ -2,6 +2,8 @@
 
 import json
 
+import pytest
+
 from lunar_lander_lab.utils.pid_search import (
     CORE_PARAM_SPACE,
     HOLDOUT_SEED_START,
@@ -18,6 +20,7 @@ def test_holdout_episodes_cannot_overlap_the_search_episodes():
     assert HOLDOUT_SEED_START > 1000, "too close to plausible episodes_per_set values"
 
 
+@pytest.mark.slow
 def test_seed_start_actually_changes_which_episodes_run():
     """If seed_start were ignored, the fix would be cosmetic and silently useless."""
     on_search = _evaluate_gain_set((_GAINS, 3, "LunarLander-v3", 0))
@@ -25,6 +28,7 @@ def test_seed_start_actually_changes_which_episodes_run():
     assert on_search["mean_reward"] != on_holdout["mean_reward"]
 
 
+@pytest.mark.slow
 def test_seed_start_is_reproducible():
     a = _evaluate_gain_set((_GAINS, 3, "LunarLander-v3", HOLDOUT_SEED_START))
     b = _evaluate_gain_set((_GAINS, 3, "LunarLander-v3", HOLDOUT_SEED_START))
@@ -34,6 +38,7 @@ def test_seed_start_is_reproducible():
     assert a["success_rate_pct"] == b["success_rate_pct"]
 
 
+@pytest.mark.slow
 def test_run_monte_carlo_reports_holdout_metrics(tmp_path):
     run_monte_carlo(
         n_samples=4,
@@ -57,6 +62,7 @@ def test_run_monte_carlo_reports_holdout_metrics(tmp_path):
     assert (tmp_path / "holdout_top_k.csv").exists()
 
 
+@pytest.mark.slow
 def test_holdout_top_k_is_clamped_to_sample_count(tmp_path):
     run_monte_carlo(
         n_samples=3,
