@@ -95,15 +95,36 @@ def select_fastest_within_floor(
     return eligible.nsmallest(top_k, "avg_steps_success")
 
 
+def _build_heuristic():
+    from ..controllers.heuristic import HeuristicController
+
+    return HeuristicController()
+
+
+def _build_scheduled():
+    from ..controllers.scheduled_heuristic import ScheduledHeuristicController
+
+    return ScheduledHeuristicController()
+
+
+# Named rather than passed as a callable: work items are pickled to worker
+# processes, and a module-level lookup survives that where a closure or a
+# bound method would not.
+CONTROLLER_FACTORIES = {"flat": _build_heuristic, "scheduled": _build_scheduled}
+
+
 def _evaluate_gain_set(args: Tuple[Dict[str, float], int, str, int]) -> Dict[str, float]:
-    """Run one gain set for `episodes` seeded episodes. Runs in a worker process."""
-    gains, episodes, env_name, seed_start = args
+    """Run one gain set for `episodes` seeded episodes. Runs in a worker process.
+
+    Accepts an optional 5th element naming the controller to build, so the
+    same search harness drives the flat and altitude-scheduled controllers.
+    """
+    gains, episodes, env_name, seed_start = args[:4]
+    factory = args[4] if len(args) > 4 else "flat"
 
     import gymnasium as gym
 
-    from ..controllers.heuristic import HeuristicController
-
-    controller = HeuristicController()
+    controller = CONTROLLER_FACTORIES[factory]()
     for name, value in gains.items():
         setattr(controller, name, value)
 
@@ -201,16 +222,22 @@ def run_monte_carlo(
     time_penalty: float = 0.0,
     holdout_top_k: int = 10,
     holdout_episodes: int = 100,
+    controller: str = "flat",
 ) -> pd.DataFrame:
     """Latin-Hypercube-sample `param_space`, evaluate each set, save dataset + plots.
 
     The reported winner is chosen by re-scoring the top `holdout_top_k` on
     `holdout_episodes` episodes the search never ranked against — see the
     comment at the selection step for why.
+
+    `controller` names an entry in `CONTROLLER_FACTORIES`, so the same search
+    drives the flat controller or the altitude-scheduled one (Arc 3 Phase C).
     """
     param_space = param_space or CORE_PARAM_SPACE
     gain_sets = sample_gain_sets(n_samples, param_space, seed=seed)
-    work_items = [(gains, episodes_per_set, env_name, 0) for gains in gain_sets]
+    work_items = [
+        (gains, episodes_per_set, env_name, 0, controller) for gains in gain_sets
+    ]
 
     n_jobs = n_jobs or os.cpu_count() or 1
     results = []
@@ -260,7 +287,7 @@ def run_monte_carlo(
     top_k = df.loc[penalized_score.nlargest(k).index]
     holdout_items = [
         ({name: float(row[name]) for name in param_names},
-         holdout_episodes, env_name, HOLDOUT_SEED_START)
+         holdout_episodes, env_name, HOLDOUT_SEED_START, controller)
         for _, row in top_k.iterrows()
     ]
     print(f"Re-scoring top {k} on {holdout_episodes} held-out episodes...")
