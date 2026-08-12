@@ -19,9 +19,10 @@ from typing import Callable, Dict, List, Optional, Sequence
 import gymnasium as gym
 import pandas as pd
 
+from .evaluation import evaluate_controller_natural
 from .paths import new_run_dir
 from .pid_search import HOLDOUT_SEED_START
-from .time_penalty import TIME_PENALTY_COEFS, evaluate_controller_natural
+from .time_penalty import TIME_PENALTY_COEFS
 
 # The top of every schedule. 0.4 is the level the flat penalty collapses at,
 # which is the point: a curriculum that arrives at 0.4 with a working policy

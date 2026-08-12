@@ -21,6 +21,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 from ..controllers.heuristic import HeuristicController
+from .evaluation import evaluate_controller_natural
 from .paths import new_run_dir
 from .pid_search import HOLDOUT_SEED_START
 from .time_penalty import (
@@ -30,7 +31,6 @@ from .time_penalty import (
     _SURFACE,
     EngineLockoutWrapper,
     _style_axes,
-    evaluate_controller_natural,
 )
 
 # The first pass ran [20, 50, 100]: 20 won, 50 already broke. So "20 is best"

@@ -69,7 +69,7 @@ def _evaluate_hparam_set(args: Tuple[int, Dict[str, float], int, int, int]) -> D
     torch.set_num_threads(1)
 
     from ..controllers.rl_agent import RLAgent
-    from .time_penalty import evaluate_controller_natural
+    from .evaluation import evaluate_controller_natural
 
     hyperparams = to_hyperparams(sample)
     agent = RLAgent()
@@ -123,7 +123,7 @@ def run_ppo_search(
     # episodes — cheap here, since the models are already trained and this is
     # inference only.
     from ..controllers.rl_agent import RLAgent
-    from .time_penalty import evaluate_controller_natural
+    from .evaluation import evaluate_controller_natural
 
     k = min(holdout_top_k, len(df))
     print(f"Re-scoring top {k} on {holdout_episodes} held-out episodes...")

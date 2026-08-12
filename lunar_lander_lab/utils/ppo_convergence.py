@@ -14,8 +14,8 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 from ..controllers.rl_agent import RLAgent
+from .evaluation import evaluate_controller_natural
 from .paths import new_run_dir
-from .time_penalty import evaluate_controller_natural
 
 TIMESTEP_CHECKPOINTS: List[int] = [100_000, 200_000, 400_000, 700_000, 1_000_000]
 

@@ -23,9 +23,9 @@ from typing import Dict, List, Optional, Sequence
 
 import pandas as pd
 
+from .evaluation import CONTINUOUS_ENV_KWARGS, evaluate_controller_natural
 from .paths import new_run_dir
 from .pid_search import HOLDOUT_SEED_START
-from .time_penalty import CONTINUOUS_ENV_KWARGS, evaluate_controller_natural
 
 # Phase 4 (old roadmap) measured 0.1 as the best flat penalty on discrete PPO
 # and it remains the strongest single setting found. Both arms train under it

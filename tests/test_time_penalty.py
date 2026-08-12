@@ -6,12 +6,8 @@ import gymnasium as gym
 import pytest
 
 from lunar_lander_lab.controllers.heuristic import HeuristicController
-from lunar_lander_lab.utils.time_penalty import (
-    VY_NORM_TO_WORLD,
-    EngineLockoutWrapper,
-    TimePenaltyWrapper,
-    evaluate_controller_natural,
-)
+from lunar_lander_lab.utils.evaluation import VY_NORM_TO_WORLD, evaluate_controller_natural
+from lunar_lander_lab.utils.time_penalty import EngineLockoutWrapper, TimePenaltyWrapper
 
 
 def test_wrapper_subtracts_exactly_the_penalty_each_step():
@@ -118,6 +114,53 @@ def test_altitude_gate_inactive_at_or_below_threshold():
 
     assert reward_w == pytest.approx(reward_p)
     assert list(obs_w) == pytest.approx(list(obs_p))
+
+
+def test_inverted_altitude_gate_fires_below_the_threshold():
+    """Arc 3 Phase D: a *terminal* cutoff, the mirror of Phase 2's initial
+    lockout. Phase 8b found cushioning the touchdown doubles the settling
+    tail, so cutting the engine for the last stretch tests whether a clean
+    drop settles faster than a feathered one."""
+    # Altitude is always above -999, so with invert the gate is never active.
+    ungated = EngineLockoutWrapper(
+        gym.make("LunarLander-v3"), altitude_threshold=-999.0, invert=True
+    )
+    plain = gym.make("LunarLander-v3")
+    ungated.reset(seed=0)
+    plain.reset(seed=0)
+
+    _, reward_gated, *_ = ungated.step(2)
+    _, reward_plain, *_ = plain.step(2)
+    ungated.close()
+    plain.close()
+
+    assert reward_gated == pytest.approx(reward_plain)
+
+
+def test_inverted_altitude_gate_blocks_when_below_threshold():
+    # Altitude never exceeds 999, so with invert the gate is always active.
+    gated = EngineLockoutWrapper(
+        gym.make("LunarLander-v3"), altitude_threshold=999.0, invert=True
+    )
+    plain = gym.make("LunarLander-v3")
+    gated.reset(seed=0)
+    plain.reset(seed=0)
+
+    obs_gated, reward_gated, *_ = gated.step(2)
+    obs_plain, reward_plain, *_ = plain.step(0)
+    gated.close()
+    plain.close()
+
+    assert reward_gated == pytest.approx(reward_plain)
+    assert list(obs_gated) == pytest.approx(list(obs_plain))
+
+
+def test_invert_is_rejected_for_a_step_gate():
+    """Inverting a step gate would mean 'block after N steps', which is a
+    different mechanism with no motivating hypothesis -- refuse rather than
+    silently do something unintended."""
+    with pytest.raises(ValueError, match="invert"):
+        EngineLockoutWrapper(gym.make("LunarLander-v3"), lockout_steps=10, invert=True)
 
 
 def test_evaluate_controller_natural_applies_env_wrapper():

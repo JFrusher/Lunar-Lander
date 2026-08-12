@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 
 from lunar_lander_lab.controllers.heuristic import HeuristicController
-from lunar_lander_lab.utils.time_penalty import (
+from lunar_lander_lab.utils.evaluation import (
     CONTINUOUS_ENV_KWARGS,
     count_engine_frames,
     evaluate_controller_natural,
