@@ -28,6 +28,10 @@ def record(
     """Run one episode, writing every `frame_skip`-th frame to `output`."""
     env = gym.make("LunarLander-v3", render_mode="rgb_array")
     observation, _ = env.reset(seed=seed)
+    # Planners carry a warm-started plan between steps; without this a retry
+    # would begin seeded by the end of the previous episode.
+    if hasattr(controller, "reset"):
+        controller.reset()
 
     frames = []
     total_reward = 0.0
@@ -59,8 +63,14 @@ def record(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--controller", choices=["heuristic", "rl"], required=True)
+    parser.add_argument(
+        "--controller", choices=["heuristic", "scheduled", "rl", "mpc"], required=True
+    )
     parser.add_argument("--model", default=None, help="Checkpoint path/name for --controller rl")
+    parser.add_argument(
+        "--gains", default=None,
+        help="Alternative gains file, for recording an older controller side by side",
+    )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--frame-skip", type=int, default=2)
@@ -70,7 +80,9 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    controller = build_controller(args.controller, model_name=args.model)
+    controller = build_controller(
+        args.controller, model_name=args.model, gains_path=args.gains
+    )
 
     seed = args.seed if args.seed is not None else 0
     while True:

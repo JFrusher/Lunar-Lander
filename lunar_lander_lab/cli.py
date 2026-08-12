@@ -30,6 +30,18 @@ DEFAULT_MODEL_NAME = "ppo_lunar_lander"
 def build_controller(
     name: str, model_name: Optional[str] = None, gains_path: Optional[str] = None
 ):
+    if name == "mpc":
+        # Imported lazily: constructing one measures constants off a live env,
+        # which is wasted work for every other subcommand.
+        from .controllers.mpc import MPCController
+
+        return MPCController()
+    if name == "scheduled":
+        from .controllers.scheduled_heuristic import ScheduledHeuristicController
+
+        return ScheduledHeuristicController(
+            gains=json.loads(Path(gains_path).read_text()) if gains_path else None
+        )
     if name == "heuristic":
         controller = HeuristicController()
         if gains_path:
@@ -207,6 +219,23 @@ def cmd_continuous_compare(args: argparse.Namespace) -> None:
     )
 
 
+def cmd_mark(args: argparse.Namespace) -> None:
+    from .utils.marking import mark_controller
+    from .utils.speed_ceiling import measure_descent_constants
+
+    const = measure_descent_constants()
+    seeds = list(range(args.seed_start, args.seed_start + args.episodes))
+    for name in args.controllers:
+        frame = mark_controller(
+            build_controller(name, model_name=args.model), seeds, name=name, const=const
+        )
+        print(f"\n=== {name}  (success {frame.attrs['success_rate_pct']:.0f}%) ===")
+        print(frame.drop(columns=["controller"]).to_string(
+            index=False, float_format=lambda v: f"{v:.2f}"
+        ))
+        print("  " + "  ".join(f"{k}={v:.2f}" for k, v in frame.attrs["behaviours"].items()))
+
+
 def cmd_benchmark(args: argparse.Namespace) -> None:
     controllers = {"Heuristic": HeuristicController()}
 
@@ -226,7 +255,9 @@ def main() -> None:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     run_parser = subparsers.add_parser("run", help="Render a controller landing an episode")
-    run_parser.add_argument("--controller", choices=["heuristic", "rl"], required=True)
+    run_parser.add_argument(
+        "--controller", choices=["heuristic", "scheduled", "rl", "mpc"], required=True
+    )
     run_parser.add_argument("--seed", type=int, default=None)
     run_parser.add_argument(
         "--loop", action="store_true", help="Keep running episodes back-to-back until Ctrl+C"
@@ -252,6 +283,19 @@ def main() -> None:
     train_parser = subparsers.add_parser("train", help="Train a PPO agent")
     train_parser.add_argument("--timesteps", type=int, default=100_000)
     train_parser.set_defaults(func=cmd_train)
+
+    mark_parser = subparsers.add_parser(
+        "mark",
+        help="Segment-by-segment report card against the idealized descent plan",
+    )
+    mark_parser.add_argument(
+        "--controllers", nargs="+", default=["heuristic", "scheduled"],
+        choices=["heuristic", "scheduled", "rl", "mpc"],
+    )
+    mark_parser.add_argument("--episodes", type=int, default=30)
+    mark_parser.add_argument("--seed-start", type=int, default=50_000)
+    mark_parser.add_argument("--model", default=None)
+    mark_parser.set_defaults(func=cmd_mark)
 
     benchmark_parser = subparsers.add_parser("benchmark", help="Compare controllers")
     benchmark_parser.add_argument("--episodes", type=int, default=50)
