@@ -5,6 +5,7 @@ this is a lower bound on landing time, not a solve of the real Box2D
 dynamics. See tmp/SPEED_ROADMAP.md, Phase 1.
 """
 
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -12,7 +13,7 @@ from typing import Dict, List, Optional, Tuple
 import gymnasium as gym
 import matplotlib.pyplot as plt
 import pandas as pd
-from gymnasium.envs.box2d.lunar_lander import FPS, LEG_DOWN, SCALE
+from gymnasium.envs.box2d.lunar_lander import FPS, LEG_DOWN, SCALE, VIEWPORT_W
 
 from .paths import new_run_dir
 
@@ -180,6 +181,192 @@ def min_time_to_land(
     # within max_ticks -- report that gentlest attempt as the closest failure.
     ticks, speed = simulate_descent(0, h0, v0, const, safe_touchdown_speed, max_ticks=max_ticks)
     return {"feasible": False, "switch_tick": 0, "ticks": ticks, "touchdown_speed": speed}
+
+
+@dataclass
+class PlanarConstants:
+    """Adds the lateral and rotational terms the 1-D model omits.
+
+    `side_dv_per_tick` and `side_domega_per_tick` are the measured effect of
+    one side-engine frame; `inertia` is Box2D's own value for the lander body.
+    The main engine's thrust rotates with the hull -- at tilt theta its
+    acceleration is `engine_dv_per_tick * (-sin theta, cos theta)`, verified
+    against the live env at three tilt angles.
+    """
+
+    descent: DescentConstants
+    side_dv_per_tick: float
+    side_domega_per_tick: float
+    inertia: float
+
+
+def measure_planar_constants(n_samples: int = 20, seed_start: int = 0) -> PlanarConstants:
+    """Measure the lateral/rotational constants off a live env.
+
+    Same reasoning as `measure_descent_constants`: these depend on Box2D's
+    fixture geometry and a per-step random dispersion, so reading them off the
+    running simulation beats re-deriving the geometry by hand.
+    """
+    descent = measure_descent_constants(n_samples=n_samples, seed_start=seed_start)
+
+    env = gym.make("LunarLander-v3")
+    env.reset(seed=seed_start)
+    inertia = env.unwrapped.lander.inertia
+
+    dvs, domegas = [], []
+    for s in range(seed_start, seed_start + n_samples):
+        env.reset(seed=s)
+        lander = env.unwrapped.lander
+        vx0, omega0 = lander.linearVelocity.x, lander.angularVelocity
+        env.step(1)  # left orientation engine
+        dvs.append(abs(lander.linearVelocity.x - vx0))
+        domegas.append(abs(lander.angularVelocity - omega0))
+    env.close()
+
+    return PlanarConstants(
+        descent=descent,
+        side_dv_per_tick=sum(dvs) / len(dvs),
+        side_domega_per_tick=sum(domegas) / len(domegas),
+        inertia=inertia,
+    )
+
+
+def sample_planar_initial_states(
+    n_samples: int = 20, seed_start: int = 0
+) -> List[Tuple[float, float, float, float]]:
+    """Sample `(altitude, vy, x offset from pad, vx)` at the first observation.
+
+    The lander spawns essentially centred but with a large random lateral
+    velocity -- that velocity, not the position error, is what makes the
+    horizontal problem cost time.
+    """
+    env = gym.make("LunarLander-v3")
+    pad_x = VIEWPORT_W / SCALE / 2
+    states = []
+    for s in range(seed_start, seed_start + n_samples):
+        env.reset(seed=s)
+        u = env.unwrapped
+        touchdown_y = u.helipad_y + LEG_DOWN / SCALE
+        states.append(
+            (
+                u.lander.position.y - touchdown_y,
+                u.lander.linearVelocity.y,
+                u.lander.position.x - pad_x,
+                u.lander.linearVelocity.x,
+            )
+        )
+    env.close()
+    return states
+
+
+def min_time_lateral(
+    x0: float, vx0: float, accel_per_tick: float, dt: float, max_ticks: int = 5000
+) -> int:
+    """Minimum ticks to bring `(x, vx)` to rest at the pad with |a| bounded.
+
+    Time-optimal control of a double integrator: accelerate hard toward the
+    switching curve `x + vx|vx| / 2a = 0`, then decelerate hard along it. This
+    is the textbook bang-bang solution, and unlike the vertical leg there is
+    no gravity term to make continuous braking run away.
+    """
+    if accel_per_tick <= 0:
+        return max_ticks
+    accel = accel_per_tick / dt  # per second^2
+    x, vx, t = x0, vx0, 0
+    while t < max_ticks:
+        # Close enough that another tick of thrust would overshoot.
+        if abs(x) < 0.5 * accel_per_tick * dt and abs(vx) < accel_per_tick:
+            return t
+        switch = x + vx * abs(vx) / (2 * accel)
+        a = -accel if switch > 0 else accel
+        vx += a * dt
+        x += vx * dt
+        t += 1
+    return max_ticks
+
+
+def planar_bound(
+    h0: float,
+    vy0: float,
+    x0: float,
+    vx0: float,
+    const: PlanarConstants,
+    safe_touchdown_speed: float,
+    n_tilt_steps: int = 60,
+) -> Dict[str, float]:
+    """Fastest idealized landing found, over two strategy families.
+
+    **These are achievable-strategy estimates, not lower bounds**, and the
+    distinction matters because getting it wrong is exactly the mistake this
+    function was written to correct.
+
+    `untilted_ticks` is the strategy the 1-D model assumed: thrust straight
+    up, correct laterally with whatever is left. `best_tilt_ticks` searches a
+    constant tilt, where the main engine gives `cos(theta)` vertically and
+    `sin(theta)` laterally.
+
+    Tilting turns out to be *faster*, which is not a bug. A tilted engine has
+    a smaller vertical component, and the descent is limited by how tightly a
+    bang-bang actuator can hold the touchdown-speed cap: an over-powered
+    engine overshoots below the cap and wastes time, a weaker effective one
+    tracks it closely. Tilt buys finer vertical control at the price of
+    lateral drift, and the lateral leg prices that drift.
+
+    So the true idealized optimum is **at most** `best_ticks` -- a
+    time-varying tilt could do better still. Nothing here is a floor no
+    controller can beat; it is the best plan this model knows how to fly.
+    """
+    dt = const.descent.dt
+    vertical_ticks, _ = _vertical_ticks(h0, vy0, const.descent, safe_touchdown_speed)
+
+    # No tilt: thrust straight up, correct laterally with the side engines
+    # plus whatever the hull's own attitude allows. Both legs must finish, so
+    # the strategy takes the longer of the two.
+    lateral_ticks = min_time_lateral(x0, vx0, const.side_dv_per_tick, dt)
+    untilted = max(vertical_ticks, lateral_ticks)
+
+    # Shared budget, best constant tilt. Infeasible tilts must be rejected,
+    # not just scored: past a certain angle the vertical component drops below
+    # gravity, and the "fast" result the search would otherwise pick is the
+    # lander arriving early by falling out of the sky.
+    best_ticks, best_tilt = None, 0.0
+    for i in range(n_tilt_steps):
+        theta = (math.pi / 2) * i / n_tilt_steps
+        tilted = DescentConstants(
+            mass=const.descent.mass,
+            gravity=const.descent.gravity,
+            engine_dv_per_tick=const.descent.engine_dv_per_tick * math.cos(theta),
+            dt=dt,
+        )
+        v_ticks, feasible = _vertical_ticks(h0, vy0, tilted, safe_touchdown_speed)
+        if not feasible:
+            continue
+        lat_accel = const.descent.engine_dv_per_tick * math.sin(theta) + const.side_dv_per_tick
+        l_ticks = min_time_lateral(x0, vx0, lat_accel, dt)
+        combined = max(v_ticks, l_ticks)
+        if best_ticks is None or combined < best_ticks:
+            best_ticks, best_tilt = combined, theta
+
+    if best_ticks is None:
+        # No constant tilt lands safely at all -- report the untilted vertical
+        # solve so the caller gets a number with a meaning rather than None.
+        best_ticks, best_tilt = vertical_ticks, 0.0
+
+    return {
+        "vertical_ticks": vertical_ticks,
+        "lateral_ticks": lateral_ticks,
+        "untilted_ticks": untilted,
+        "best_tilt_ticks": best_ticks,
+        "tilt_rad": best_tilt,
+        "best_ticks": min(untilted, best_ticks),
+    }
+
+
+def _vertical_ticks(
+    h0: float, vy0: float, const: DescentConstants, safe_touchdown_speed: float
+) -> Tuple[int, bool]:
+    result = min_time_to_land(h0, vy0, const, safe_touchdown_speed)
+    return result["ticks"], result["feasible"]
 
 
 def ceiling_chart_data(
