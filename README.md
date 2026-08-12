@@ -7,11 +7,17 @@ A Python workspace for experimenting with classical (rule-based) control and
 reinforcement learning on Gymnasium's `LunarLander-v3`.
 
 <p align="center">
-  <img src="docs/media/rl_landing.gif" alt="PPO controller landing" width="45%">
-  <img src="docs/media/heuristic_landing.gif" alt="Heuristic controller landing" width="45%">
+  <img src="docs/media/heuristic_landing.gif" alt="Flat-gain heuristic controller landing" width="45%">
+  <img src="docs/media/scheduled_landing.gif" alt="Gain-scheduled heuristic controller landing" width="45%">
   <br>
-  <em>PPO (left) and the hand-tuned heuristic controller (right).</em>
+  <em>Same seed, same terrain, same initial push. One gain set for the whole
+  descent (left, 385 steps) versus gains scheduled by altitude band
+  (right, 240 steps).</em>
 </p>
+
+Seed 50014 is representative rather than flattering: both controllers land
+in almost exactly their average number of steps on it (388 and 252 across
+the validation set). The most favourable seed would have shown 449 vs 249.
 
 ## Results
 
@@ -65,6 +71,49 @@ below what either controller achieves:
 
 ![speed ceiling](docs/media/speed_ceiling.png)
 
+### Everything tried, and what it cost
+
+![frontier](docs/media/frontier.png)
+
+| controller | flight steps | success | off-nominal success |
+|---|---|---|---|
+| **MPC (planner)** | **157.8** | 72.0% | 30.6% |
+| **Gain-scheduled heuristic** | **185.9** | **100.0%** | 47.8% |
+| PPO, lockout-trained | 186.1 | 95.0% | **66.2%** |
+| PPO, penalty curriculum | 200.7 | 99.0% | 54.6% |
+| Heuristic + 15-step lockout | 277.1 | 99.0% | 47.0% |
+| Heuristic (flat) | 301.1 | 100.0% | 51.2% |
+| Heuristic (before any of this) | 329.2 | 98.0% | 50.2% |
+
+Bold = on the Pareto frontier. *Flight* steps, not totals: about 23% of a
+LunarLander episode happens after touchdown, while Box2D settles the lander
+to sleep, and no controller can fly its way out of it.
+
+**Flight time fell 52% overall**, and the single largest contributor was not
+a reinforcement-learning technique — it was giving the classical controller
+different gains at different altitudes. That controller now matches
+1M-timestep PPO on speed and beats it on reliability, having been tuned in
+about fifteen minutes of sampling.
+
+That comparison deserves a caveat: the classical controller has
+hand-designed structure encoding real knowledge, while PPO was handed an
+8-vector and left to work it out. The result says the structure is good and
+the problem is small — not that policy gradients are bad.
+
+**Every controller here is brittle to wind it was never tuned against**, and
+the one with the *worst* nominal success transfers best, because training
+under a forced engine lockout accidentally taught it to recover from
+uncontrolled drift. Nothing in this project ever optimised for robustness;
+every number in that column is incidental.
+
+Four ideas that sounded good and weren't: a **continuous action space** makes
+landings *slower* (throttle lets the policy cushion the touchdown, doubling
+the settling tail); **more time pressure buys no more speed** past a point —
+4× the penalty, no gain; **planning is fastest but least reliable**, and its
+failures are directional (99% success under weak gravity, 14% under strong,
+because its model is wrong in a specific direction); and **cutting the engine
+before touchdown** makes settling worse, not better.
+
 📖 **[Read the full investigation →](INVESTIGATION.md)** — six methodology
 bugs, most of them caught by treating a suspiciously clean number as a bug
 report against my own analysis.
@@ -77,29 +126,43 @@ Lunar/
 ├── LICENSE
 ├── pyproject.toml
 ├── .github/workflows/ci.yml   # lint + fast/slow test jobs
+├── docs/
+│   ├── METHOD.md              # how the project is run: rules, phases, what got killed
+│   └── media/                 # the curated, tracked figures the docs link
+├── scripts/
+│   ├── record_demo.py         # reproducible demo GIFs via rgb_array
+│   └── regen_speed_media.py   # rebuild docs/media/ from runs/
 ├── tests/                     # pytest suite (see Testing below)
 ├── runs/                      # gitignored — all run output, kept forever
 │   ├── train/<timestamp>/     # PPO checkpoints (.zip)
 │   ├── pid_search/<timestamp>/ # gain-sweep datasets + plots
-│   ├── ppo_convergence/<timestamp>/ # timestep-budget convergence curves
-│   ├── ppo_search/<timestamp>/ # PPO hyperparameter sweep datasets
-│   ├── multi_seed_sweep/<timestamp>/ # multi-seed sweeps + error-bar charts
-│   └── benchmark/<timestamp>/ # comparison charts
+│   ├── gain_schedule/         # altitude-banded gain searches
+│   ├── robustness/<timestamp>/ # off-nominal physics transfer checks
+│   └── …                      # one directory per study, timestamped
 └── lunar_lander_lab/
     ├── cli.py                 # CLI entry point
     ├── configs/
-    │   └── heuristic_gains.json   # tuned heuristic gains, hand-updated from sweeps
+    │   ├── heuristic_gains.json    # tuned flat gains, hand-promoted from sweeps
+    │   └── scheduled_gains.json    # tuned per-altitude-band gains
     ├── controllers/
     │   ├── base.py             # BaseController abstract interface
-    │   ├── heuristic.py         # HeuristicController: rule-based PID-style logic
-    │   └── rl_agent.py          # RLAgent: PPO wrapper (Stable-Baselines3)
+    │   ├── heuristic.py        # rule-based proportional controller
+    │   ├── scheduled_heuristic.py  # …with gains scheduled by altitude band
+    │   ├── rl_agent.py         # PPO wrapper (Stable-Baselines3)
+    │   └── mpc.py              # receding-horizon planner (CEM)
     └── utils/
-        ├── paths.py             # runs/ directory helpers
-        ├── evaluation.py        # run_benchmark(): head-to-head controller comparison
-        ├── pid_search.py        # Monte Carlo gain sweep
-        ├── ppo_convergence.py   # how many timesteps PPO actually needs
-        ├── ppo_search.py        # Monte Carlo PPO hyperparameter sweep
-        └── time_penalty.py      # time-penalty reward shaping + multi-seed sweeps
+        ├── paths.py            # runs/ directory helpers
+        ├── evaluation.py       # run_benchmark(): head-to-head comparison
+        ├── pid_search.py       # Monte Carlo gain sweep + held-out selection
+        ├── speed_ceiling.py    # idealized minimum-time descent bound
+        ├── marking.py          # segment-by-segment report cards
+        ├── robustness.py       # off-nominal physics transfer
+        ├── lockout_sweep.py    # engine-lockout gating study
+        ├── penalty_curriculum.py   # annealed time penalty
+        ├── continuous_compare.py   # discrete vs continuous action space
+        ├── ppo_convergence.py  # how many timesteps PPO actually needs
+        ├── ppo_search.py       # Monte Carlo PPO hyperparameter sweep
+        └── time_penalty.py     # reward-shaping wrappers + evaluation metrics
 ```
 
 ## Setup
@@ -140,13 +203,21 @@ root as `python -m lunar_lander_lab.cli`.
 ### Render a controller landing an episode
 
 ```bash
+lunar-lander run --controller scheduled --loop     # the fastest reliable one
 lunar-lander run --controller heuristic
+lunar-lander run --controller mpc
 lunar-lander run --controller rl
 ```
 
-Opens a Pygame window and renders one episode. `--controller rl` loads the
-most recently trained checkpoint under `runs/train/` (or pass an explicit
-path with `--model`).
+Opens a Pygame window and renders episodes, printing steps split into
+**flight + settling** — about a quarter of a "landing" happens after
+touchdown while Box2D settles the lander, and no controller can shorten it.
+
+`--controller rl` loads the most recently trained checkpoint under
+`runs/train/` (or pass an explicit path with `--model`). `--gains` flies an
+alternative gain file, which is how you compare a tuned controller against
+its predecessor side by side. `--lockout-steps` / `--lockout-altitude` block
+the main engine for part of the descent.
 
 ### Train a PPO agent
 
@@ -225,6 +296,37 @@ speed / reward trade-off. `multi-seed-sweep` repeats across seeds and
 aggregates mean ± std — the chart in [Results](#results). Both evaluate on
 natural (unpenalized) reward, so the penalty never scores its own effect.
 
+### Mark a controller segment by segment
+
+```bash
+lunar-lander mark --controllers heuristic scheduled --episodes 30
+```
+
+Splits each episode into `DESCENT` / `APPROACH` / `TERMINAL` / `SETTLING`,
+grades each segment against the idealized descent plan run from that
+episode's own start state, and reports named behaviours (hovering, attitude
+oscillation, wasted thrust, lateral wandering).
+
+Grades are `ideal / actual`, capped at 1.0 — beating the idealized plan
+would mean the model is wrong, which is a finding to chase rather than a
+grade to award. `SETTLING` is ungraded because the descent model stops at
+ground contact.
+
+This is what shows that the flat controller's weakness is the *descent*
+(grade 0.32) and not the landing (0.85), and that gain scheduling bought
+descent speed by giving some terminal quality back.
+
+### Study the descent limits
+
+```bash
+lunar-lander speed-ceiling          # idealized minimum-time bound
+lunar-lander lockout-sweep          # block the main engine early
+lunar-lander penalty-curriculum-sweep   # anneal the time penalty over training
+lunar-lander continuous-compare     # discrete vs continuous action space
+```
+
+Each writes a timestamped directory under `runs/` with CSVs and plots.
+
 ### View training curves
 
 `RLAgent.train()` takes an optional `tensorboard_log` directory:
@@ -244,7 +346,8 @@ want the extra writes. Worth switching on when a single run's behaviour
 ### Record a demo GIF
 
 ```bash
-python scripts/record_demo.py --controller rl --output docs/media/rl_landing.gif --require-landing
+python scripts/record_demo.py --controller scheduled --seed 50014 \
+    --output docs/media/scheduled_landing.gif
 ```
 
 Renders an episode via `rgb_array` and encodes it with `imageio` (install
