@@ -10,7 +10,7 @@ truth.
 """
 
 import math
-from typing import Callable, Dict, Optional, Tuple
+from typing import TYPE_CHECKING, Callable, Dict, Optional, Tuple
 
 import gymnasium as gym
 import matplotlib.pyplot as plt
@@ -18,8 +18,16 @@ import numpy as np
 import pandas as pd
 from gymnasium.envs.box2d.lunar_lander import FPS, SCALE, VIEWPORT_H
 
-from ..controllers.base import BaseController
 from .paths import new_run_dir
+
+if TYPE_CHECKING:  # pragma: no cover
+    # Type-checking only. Importing the controllers package at runtime creates
+    # a cycle -- controllers/__init__ pulls in ScheduledHeuristicController,
+    # which builds its parameter space from pid_search, which imports this
+    # module. Worse, the cycle only fires on some import orders, and in a
+    # multiprocessing pool the workers die on import and the parent waits
+    # forever rather than reporting anything.
+    from ..controllers.base import BaseController
 
 # A landing is considered successful once the episode's total reward crosses
 # this threshold (LunarLander awards +100 for a safe landing on top of the
@@ -75,7 +83,7 @@ SIDE_ENGINE_REWARD_COST = 0.03
 
 
 def evaluate_controller_natural(
-    controller: BaseController,
+    controller: "BaseController",
     num_episodes: int,
     env_name: str = "LunarLander-v3",
     seed_start: int = 0,
@@ -178,7 +186,7 @@ def evaluate_controller_natural(
 
 
 def run_benchmark(
-    controllers: Dict[str, BaseController],
+    controllers: Dict[str, "BaseController"],
     env_name: str = "LunarLander-v3",
     num_episodes: int = 50,
     plot_path: Optional[str] = None,
