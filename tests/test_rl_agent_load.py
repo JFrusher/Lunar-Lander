@@ -94,3 +94,88 @@ def test_tensorboard_log_reaches_ppo_when_requested(tmp_path, monkeypatch):
     assert captured["tensorboard_log"] == str(tmp_path / "tb")
     # The shared default dict must be untouched by that call.
     assert "tensorboard_log" not in DEFAULT_HYPERPARAMS
+
+
+# --- Arc 4 Phase B: algo parametrization (SAC/DQN/TD3 alongside PPO) -------
+
+
+def test_default_algo_is_still_ppo():
+    """`RLAgent()` with no `algo` must behave exactly as before this arg
+    existed -- every earlier result in this repo assumed that."""
+    from stable_baselines3 import PPO
+
+    assert RLAgent().algo is PPO
+
+
+def test_default_env_kwargs_by_algo():
+    from stable_baselines3 import DQN, PPO, SAC, TD3
+
+    from lunar_lander_lab.controllers.rl_agent import _default_env_kwargs
+
+    assert _default_env_kwargs(PPO) == {}
+    assert _default_env_kwargs(DQN) == {}
+    assert _default_env_kwargs(SAC) == {"continuous": True}
+    assert _default_env_kwargs(TD3) == {"continuous": True}
+
+
+def test_dqn_rejects_an_explicit_continuous_env_override():
+    from stable_baselines3 import DQN
+
+    with pytest.raises(ValueError, match="discrete"):
+        RLAgent(algo=DQN).train(total_timesteps=1, env_kwargs={"continuous": True})
+
+
+def test_sac_rejects_an_explicit_discrete_env_override():
+    from stable_baselines3 import SAC
+
+    with pytest.raises(ValueError, match="continuous"):
+        RLAgent(algo=SAC).train(total_timesteps=1, env_kwargs={})
+
+
+def test_env_kwargs_defaults_to_discrete_with_no_model():
+    assert RLAgent().env_kwargs == {}
+
+
+def test_env_kwargs_reflects_a_loaded_continuous_model():
+    from gymnasium import spaces
+
+    class _FakeModel:
+        action_space = spaces.Box(-1, 1, (2,))
+
+    agent = RLAgent()
+    agent.model = _FakeModel()
+    assert agent.env_kwargs == {"continuous": True}
+
+
+def test_env_kwargs_reflects_a_loaded_discrete_model():
+    from gymnasium import spaces
+
+    class _FakeModel:
+        action_space = spaces.Discrete(4)
+
+    agent = RLAgent()
+    agent.model = _FakeModel()
+    assert agent.env_kwargs == {}
+
+
+@pytest.mark.slow
+def test_train_load_and_act_round_trips_for_a_non_ppo_algorithm(tmp_path, monkeypatch):
+    """DQN end-to-end: train() -> save -> load() -> get_action(). Proves the
+    algo parametrization actually reaches a second SB3 algorithm family
+    through the real SB3 API, not just PPO with an unused constructor arg."""
+    from stable_baselines3 import DQN
+
+    monkeypatch.setattr(
+        "lunar_lander_lab.controllers.rl_agent.new_run_dir", lambda _kind: tmp_path
+    )
+
+    agent = RLAgent(algo=DQN)
+    saved_path = agent.train(
+        total_timesteps=200,
+        save_path="dqn_smoke",
+        hyperparams={"buffer_size": 1_000, "learning_starts": 10},
+    )
+
+    loaded = RLAgent(algo=DQN)
+    loaded.load(saved_path)
+    assert loaded.get_action([0.0] * 8) in {0, 1, 2, 3}

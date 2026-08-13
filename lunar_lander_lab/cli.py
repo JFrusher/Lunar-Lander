@@ -7,13 +7,11 @@ Usage:
 """
 
 import argparse
-import json
-from pathlib import Path
-from typing import Optional
 
 import gymnasium as gym
 
-from .controllers import HeuristicController, RLAgent
+from .controllers import HeuristicController, RLAgent, build_controller, controller_names
+from .controllers.rl_agent import ALGOS, DEFAULT_MODEL_NAME, DEFAULT_MODEL_NAMES
 from .utils.continuous_compare import ARMS, COMPARISON_PENALTY, run_continuous_comparison
 from .utils.evaluation import SUCCESS_REWARD_THRESHOLD, run_benchmark
 from .utils.lockout_sweep import run_lockout_sweep
@@ -24,47 +22,12 @@ from .utils.ppo_search import DEFAULT_TIMESTEPS, run_ppo_search
 from .utils.speed_ceiling import run_speed_ceiling
 from .utils.time_penalty import EngineLockoutWrapper, run_multi_seed_sweep, run_time_penalty_sweep
 
-DEFAULT_MODEL_NAME = "ppo_lunar_lander"
-
-
-def build_controller(
-    name: str, model_name: Optional[str] = None, gains_path: Optional[str] = None
-):
-    if name == "mpc":
-        # Imported lazily: constructing one measures constants off a live env,
-        # which is wasted work for every other subcommand.
-        from .controllers.mpc import MPCController
-
-        return MPCController()
-    if name == "scheduled":
-        from .controllers.scheduled_heuristic import ScheduledHeuristicController
-
-        return ScheduledHeuristicController(
-            gains=json.loads(Path(gains_path).read_text()) if gains_path else None
-        )
-    if name == "heuristic":
-        controller = HeuristicController()
-        if gains_path:
-            # Override the shipped gains so an older set can be flown
-            # side-by-side with the current one. Same setattr mechanism
-            # pid_search uses to evaluate a sampled gain set.
-            for gain, value in json.loads(Path(gains_path).read_text()).items():
-                if not hasattr(controller, gain):
-                    raise ValueError(f"{gains_path}: unknown gain {gain!r}")
-                setattr(controller, gain, value)
-        return controller
-    if name == "rl":
-        agent = RLAgent()
-        agent.load(model_name or DEFAULT_MODEL_NAME)
-        return agent
-    raise ValueError(f"Unknown controller: {name}")
-
 
 def cmd_run(args: argparse.Namespace) -> None:
     controller = build_controller(
         args.controller, model_name=args.model, gains_path=args.gains
     )
-    env = gym.make("LunarLander-v3", render_mode="human")
+    env = gym.make("LunarLander-v3", render_mode="human", **controller.env_kwargs)
     if args.lockout_steps is not None or args.lockout_altitude is not None:
         env = EngineLockoutWrapper(
             env, lockout_steps=args.lockout_steps, altitude_threshold=args.lockout_altitude
@@ -128,8 +91,10 @@ def cmd_run(args: argparse.Namespace) -> None:
 
 
 def cmd_train(args: argparse.Namespace) -> None:
-    agent = RLAgent()
-    saved_path = agent.train(total_timesteps=args.timesteps, save_path=DEFAULT_MODEL_NAME)
+    agent = RLAgent(algo=ALGOS[args.algo])
+    saved_path = agent.train(
+        total_timesteps=args.timesteps, save_path=DEFAULT_MODEL_NAMES[args.algo]
+    )
     print(f"Model saved to {saved_path}")
 
 
@@ -226,8 +191,9 @@ def cmd_mark(args: argparse.Namespace) -> None:
     const = measure_descent_constants()
     seeds = list(range(args.seed_start, args.seed_start + args.episodes))
     for name in args.controllers:
+        controller = build_controller(name, model_name=args.model)
         frame = mark_controller(
-            build_controller(name, model_name=args.model), seeds, name=name, const=const
+            controller, seeds, name=name, const=const, env_kwargs=controller.env_kwargs
         )
         print(f"\n=== {name}  (success {frame.attrs['success_rate_pct']:.0f}%) ===")
         print(frame.drop(columns=["controller"]).to_string(
@@ -256,14 +222,16 @@ def main() -> None:
 
     run_parser = subparsers.add_parser("run", help="Render a controller landing an episode")
     run_parser.add_argument(
-        "--controller", choices=["heuristic", "scheduled", "rl", "mpc"], required=True
+        "--controller", choices=controller_names(), required=True
     )
     run_parser.add_argument("--seed", type=int, default=None)
     run_parser.add_argument(
         "--loop", action="store_true", help="Keep running episodes back-to-back until Ctrl+C"
     )
     run_parser.add_argument(
-        "--model", default=None, help="Checkpoint name in models/ for --controller rl (default: ppo_lunar_lander)"
+        "--model", default=None,
+        help="Checkpoint name for --controller rl/sac/dqn/td3 "
+             "(default: <algo>_lunar_lander, e.g. ppo_lunar_lander)",
     )
     run_parser.add_argument(
         "--lockout-steps", type=int, default=None,
@@ -280,8 +248,13 @@ def main() -> None:
     )
     run_parser.set_defaults(func=cmd_run)
 
-    train_parser = subparsers.add_parser("train", help="Train a PPO agent")
+    train_parser = subparsers.add_parser("train", help="Train an RL agent")
     train_parser.add_argument("--timesteps", type=int, default=100_000)
+    train_parser.add_argument(
+        "--algo", choices=sorted(ALGOS), default="ppo",
+        help="SB3 algorithm to train. sac/td3 train on a continuous action "
+             "space automatically; ppo/dqn stay discrete.",
+    )
     train_parser.set_defaults(func=cmd_train)
 
     mark_parser = subparsers.add_parser(
@@ -290,7 +263,7 @@ def main() -> None:
     )
     mark_parser.add_argument(
         "--controllers", nargs="+", default=["heuristic", "scheduled"],
-        choices=["heuristic", "scheduled", "rl", "mpc"],
+        choices=controller_names(),
     )
     mark_parser.add_argument("--episodes", type=int, default=30)
     mark_parser.add_argument("--seed-start", type=int, default=50_000)

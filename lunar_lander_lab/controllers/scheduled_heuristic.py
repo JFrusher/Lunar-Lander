@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from .heuristic import _GAINS, HeuristicController
+from .registry import register_controller
 
 _SCHEDULED_GAINS_PATH = (
     Path(__file__).resolve().parent.parent / "configs" / "scheduled_gains.json"
@@ -110,3 +111,9 @@ class ScheduledHeuristicController(HeuristicController):
         for gain in SCHEDULED_GAINS:
             setattr(self, gain, getattr(self, f"B{band}_{gain}"))
         return super().get_action(observation)
+
+
+@register_controller("scheduled")
+def _build_scheduled(model_name=None, gains_path=None) -> ScheduledHeuristicController:
+    gains = json.loads(Path(gains_path).read_text()) if gains_path else None
+    return ScheduledHeuristicController(gains=gains)

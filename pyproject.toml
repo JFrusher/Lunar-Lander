@@ -10,6 +10,7 @@ dependencies = [
     "matplotlib>=3.8.0",
     "numpy>=1.26.0",
     "pandas>=2.2.0",
+    "scipy>=1.11.0",
 ]
 
 [project.optional-dependencies]
@@ -22,6 +23,9 @@ dev = [
     # Only needed to view training curves (RLAgent.train(tensorboard_log=...)).
     # SB3 imports it lazily, so the core install stays lean.
     "tensorboard>=2.16",
+]
+dashboard = [
+    "streamlit>=1.30",
 ]
 
 [project.scripts]

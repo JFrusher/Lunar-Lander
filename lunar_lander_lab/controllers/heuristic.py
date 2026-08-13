@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Sequence
 
 from .base import BaseController
+from .registry import register_controller
 
 _GAINS_PATH = Path(__file__).resolve().parent.parent / "configs" / "heuristic_gains.json"
 _GAINS = json.loads(_GAINS_PATH.read_text())
@@ -53,3 +54,17 @@ class HeuristicController(BaseController):
         if vertical_correction > self.HOVER_THRESHOLD:
             return 2  # fire main engine
         return 0
+
+
+@register_controller("heuristic")
+def _build_heuristic(model_name=None, gains_path=None) -> HeuristicController:
+    controller = HeuristicController()
+    if gains_path:
+        # Override the shipped gains so an older set can be flown
+        # side-by-side with the current one. Same setattr mechanism
+        # pid_search uses to evaluate a sampled gain set.
+        for gain, value in json.loads(Path(gains_path).read_text()).items():
+            if not hasattr(controller, gain):
+                raise ValueError(f"{gains_path}: unknown gain {gain!r}")
+            setattr(controller, gain, value)
+    return controller

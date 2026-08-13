@@ -19,3 +19,15 @@ class BaseController(ABC):
         env it is evaluated against.
         """
         raise NotImplementedError
+
+    @property
+    def env_kwargs(self) -> dict:
+        """Extra `gym.make()` kwargs this controller's actions require.
+
+        Default `{}` -- the env's default `Discrete(4)` action space, which
+        every controller but a continuous-only `RLAgent` uses. Checked by
+        `cli.py`'s `run`/`mark` commands so a controller wrapping a
+        continuous-only algorithm (SAC, TD3) gets a matching env
+        automatically instead of crashing inside `env.step()`.
+        """
+        return {}

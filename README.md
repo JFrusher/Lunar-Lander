@@ -351,9 +351,42 @@ the `dev` extra first). Reproducible, unlike a screen capture.
 - **`HeuristicController`** — proportional control on horizontal position,
   velocity, angle and descent speed. Swept gains load from
   `configs/heuristic_gains.json`; unswept gains are class attributes.
-- **`RLAgent`** — trains/loads a PPO model and selects actions via
+- **`ScheduledHeuristicController`** — the same proportional control, with
+  the core gains scheduled by altitude band instead of fixed for the whole
+  descent (`configs/scheduled_gains.json`).
+- **`MPCController`** — receding-horizon planning via the cross-entropy
+  method against an analytical planar model, replanned every step.
+- **`LQRController`** — continuous state-feedback control from a Riccati
+  solve (`scipy.linalg.solve_continuous_are`), linearized around level
+  hover. Uses a continuous action space; every other controller here uses
+  the discrete one.
+- **`RLAgent`** — trains/loads a Stable-Baselines3 model (PPO, SAC, DQN, or
+  TD3 — `--algo` on `lunar-lander train`) and selects actions via
   `model.predict(obs, deterministic=True)`.
 
-Both implement `BaseController.get_action(observation) -> int`, so a new
-controller can be dropped in and benchmarked the exact same way as these
-two.
+All implement `BaseController.get_action(observation)`, so a new controller
+can be dropped in and benchmarked the exact same way as these. Each module
+registers itself against a name (`lunar_lander_lab/controllers/registry.py`)
+via `@register_controller("name")` — that name is what every CLI flag
+(`--controller`, `--controllers`) and the dashboard's controller picker
+lists; adding a controller means writing the class and one registration
+call, not editing `cli.py`.
+
+## Dashboard
+
+```bash
+pip install -e ".[dashboard]"
+streamlit run lunar_lander_lab/dashboard/app.py
+```
+
+A local Streamlit UI over the same machinery the CLI uses — nothing here is
+scored or trained differently than `mark`/`benchmark`/`train` already do:
+
+- **Run & Visualize** — pick any registered controller, fly one seeded
+  episode, watch it land frame-by-frame.
+- **Compare** — pick several controllers, get aggregate metrics
+  (`utils/evaluation.py`) and per-segment report cards
+  (`utils/marking.py`) side by side.
+- **Train** — kick off a real training run (any `--algo`) and tail its
+  output live; the checkpoint lands in `runs/train/` exactly as it would
+  from the CLI, and the other two tabs pick up the newest one automatically.

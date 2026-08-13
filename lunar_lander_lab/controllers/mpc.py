@@ -24,6 +24,7 @@ from gymnasium.envs.box2d.lunar_lander import FPS, SCALE, VIEWPORT_H, VIEWPORT_W
 
 from ..utils.speed_ceiling import PlanarConstants, measure_planar_constants
 from .base import BaseController
+from .registry import register_controller
 
 # The env reports a normalised observation; the planar model works in world
 # units. See LunarLander's step(): x is divided by VIEWPORT_W/SCALE/2, vx is
@@ -318,3 +319,8 @@ class MPCController(BaseController):
         """Drop the warm start. Call between episodes -- otherwise the first
         plan of a new episode is seeded by the end of the previous one."""
         self._probs = None
+
+
+@register_controller("mpc")
+def _build_mpc(model_name=None, gains_path=None) -> MPCController:
+    return MPCController()
