@@ -3,28 +3,21 @@
 [![CI](https://github.com/JFrusher/Lunar-Lander/actions/workflows/ci.yml/badge.svg)](https://github.com/JFrusher/Lunar-Lander/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-A Python workspace for experimenting with classical (rule-based) control and
-reinforcement learning on Gymnasium's `LunarLander-v3`.
+A Python workspace for messing around with classical (rule-based) control
+and reinforcement learning on Gymnasium's `LunarLander-v3`.
 
 <p align="center">
   <img src="docs/media/heuristic_landing.gif" alt="Flat-gain heuristic controller landing" width="45%">
   <img src="docs/media/scheduled_landing.gif" alt="Gain-scheduled heuristic controller landing" width="45%">
   <br>
-  <em>Same seed, same terrain, same initial push. One gain set for the whole
-  descent (left, 385 steps) versus gains scheduled by altitude band
-  (right, 240 steps).</em>
 </p>
-
-Seed 50014 is representative rather than flattering: both controllers land
-in almost exactly their average number of steps on it (388 and 252 across
-the validation set). The most favourable seed would have shown 449 vs 249.
 
 ## Results
 
-A per-step time penalty of 0.1 during PPO training buys **22% faster
-landings at no cost to reward or success rate** — and does nothing at all
-to the heuristic controller. Three seeds per point, evaluated on held-out
-episodes.
+A per-step time penalty of 0.1 during PPO training buys 22% faster
+landings at basically no cost to reward or success rate. It does nothing
+at all to the heuristic controller, though. Three seeds per point,
+evaluated on held-out episodes.
 
 ![time penalty trade-off](docs/media/time_penalty_tradeoff.png)
 
@@ -36,20 +29,15 @@ episodes.
 | Heuristic | 0.0 | 246.8 ± 2.4 | 97.3% | 401 |
 | Heuristic | 0.4 | 248.5 ± 2.9 | 97.0% | 388 |
 
-Each row is the mean over 3 independent runs at that penalty level — for
-the heuristic, 3 fresh gain searches; for PPO, 3 training runs.
+Each row is the mean over 3 independent runs at that penalty level.
 
-The penalty shapes what PPO *learns*, but for the heuristic it only
-re-ranks a fixed pool of already-sampled gain sets — so it applies no
-search pressure and cannot produce a faster controller.
-
-**PPO needs ~400k timesteps to land at all**, and 1M to do it well; below
-that it fails outright rather than merely underperforming.
+PPO needed about 400k timesteps just to land at all, and 1M to do it
+well. Below that it just fails outright, no partial credit.
 
 ### Making the heuristic faster
 
-Two mechanisms the penalty sweep never tried, measured on 200 held-out
-episodes the search never saw:
+There were two mechanisms the penalty sweep never touched, measured on
+200 held-out episodes the search never saw:
 
 | heuristic config | steps | success | reward | fuel |
 |---|---|---|---|---|
@@ -61,17 +49,18 @@ episodes the search never saw:
 ![lockout sweep](docs/media/lockout_step_sweep.png)
 
 Blocking the main engine for the first 15 steps forces an efficient
-free-fall instead of an early hover, and it stacks with re-picking the gains
-for speed rather than reward — **−11.3% together**, on 12.9% *less* fuel.
-Longer lockouts collapse both controllers; the transition is a ramp, not a
-cliff, and finding that needed a grid fine enough to see it.
+free-fall instead of an early hover, and it stacks with re-picking the
+gains for speed instead of reward: 11.3% faster together, on 12.9% less
+fuel. Longer lockouts collapse both controllers. The transition is a
+ramp, not a cliff, and finding that out took a grid fine enough to
+actually see it.
 
-How much is left? A point-mass minimum-time descent puts the floor well
-below what either controller achieves:
+So how much speed is still on the table? A point-mass minimum-time
+descent puts the floor well below what either controller achieves:
 
 ![speed ceiling](docs/media/speed_ceiling.png)
 
-### Everything tried, and what it cost
+### Everything I tried, and what it cost
 
 ![frontier](docs/media/frontier.png)
 
@@ -85,38 +74,42 @@ below what either controller achieves:
 | Heuristic (flat) | 301.1 | 100.0% | 51.2% |
 | Heuristic (before any of this) | 329.2 | 98.0% | 50.2% |
 
-Bold = on the Pareto frontier. *Flight* steps, not totals: about 23% of a
-LunarLander episode happens after touchdown, while Box2D settles the lander
-to sleep, and no controller can fly its way out of it.
+Bold marks the Pareto frontier. These are *flight* steps, not totals —
+about 23% of a LunarLander episode happens after touchdown, while Box2D
+settles the lander to sleep, and no controller can fly its way out of
+that part.
 
-**Flight time fell 52% overall**, and the single largest contributor was not
-a reinforcement-learning technique — it was giving the classical controller
-different gains at different altitudes. That controller now matches
-1M-timestep PPO on speed and beats it on reliability, having been tuned in
-about fifteen minutes of sampling.
+Flight time fell 52% overall. The single biggest contributor wasn't a
+reinforcement-learning technique at all, it was giving the classical
+controller different gains at different altitudes. That controller now
+matches 1M-timestep PPO on speed and beats it on reliability, and it took
+about fifteen minutes of sampling to get there.
 
-That comparison deserves a caveat: the classical controller has
-hand-designed structure encoding real knowledge, while PPO was handed an
-8-vector and left to work it out. The result says the structure is good and
-the problem is small — not that policy gradients are bad.
+Worth a caveat on that comparison: the classical controller has
+hand-designed structure baked in that encodes real domain knowledge,
+while PPO was just handed an 8-vector and left to figure it out on its
+own. What this really says is that the structure is good and the problem
+is small, not that policy gradients are bad at their job.
 
-**Every controller here is brittle to wind it was never tuned against**, and
-the one with the *worst* nominal success transfers best, because training
-under a forced engine lockout accidentally taught it to recover from
-uncontrolled drift. Nothing in this project ever optimised for robustness;
-every number in that column is incidental.
+Every controller here is brittle to wind it was never tuned against, and
+oddly the one with the *worst* nominal success transfers best — because
+training under a forced engine lockout accidentally taught it to recover
+from uncontrolled drift. Nothing in this project ever set out to optimize
+for robustness; every number in that column showed up by accident.
 
-Four ideas that sounded good and weren't: a **continuous action space** makes
-landings *slower* (throttle lets the policy cushion the touchdown, doubling
-the settling tail); **more time pressure buys no more speed** past a point —
-4× the penalty, no gain; **planning is fastest but least reliable**, and its
-failures are directional (99% success under weak gravity, 14% under strong,
-because its model is wrong in a specific direction); and **cutting the engine
-before touchdown** makes settling worse, not better.
+Four ideas that sounded good on paper and weren't: a continuous action
+space makes landings slower (throttle lets the policy cushion the
+touchdown, which doubles the settling tail); more time pressure buys no
+more speed past a certain point (4× the penalty, no extra gain); planning
+is the fastest option but the least reliable, and its failures point in a
+specific direction (99% success under weak gravity, 14% under strong,
+because its internal model is wrong in a specific direction); and cutting
+the engine before touchdown makes settling worse, not better.
 
-📖 **[Read the full investigation →](INVESTIGATION.md)** — six methodology
-bugs, most of them caught by treating a suspiciously clean number as a bug
-report against my own analysis.
+📖 **[Read the full investigation →](INVESTIGATION.md)** — six
+methodology bugs, most of them caught by getting suspicious of a number
+that looked too clean and treating it as a bug report against my own
+analysis.
 
 ## Project Structure
 
@@ -361,5 +354,6 @@ the `dev` extra first). Reproducible, unlike a screen capture.
 - **`RLAgent`** — trains/loads a PPO model and selects actions via
   `model.predict(obs, deterministic=True)`.
 
-Both implement `BaseController.get_action(observation) -> int`, so new
-controllers can be dropped in and benchmarked the same way.
+Both implement `BaseController.get_action(observation) -> int`, so a new
+controller can be dropped in and benchmarked the exact same way as these
+two.
